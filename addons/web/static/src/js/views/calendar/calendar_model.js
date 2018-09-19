@@ -216,9 +216,9 @@ return AbstractModel.extend({
             filters: params.filters,
         };
 
+        this.setDate(params.initialDate);
         // Use mode attribute in xml file to specify zoom timeline (day,week,month)
         // by default month.
-        this.setDate(params.initialDate, true);
         this.setScale(params.mode);
 
         _.each(this.data.filters, function (filter) {
@@ -251,10 +251,14 @@ return AbstractModel.extend({
     },
     /**
      * @param {Moment} start
-     * @param {boolean} highlight
      */
-    setDate: function (start, highlight) {
-        this.data.start_date = this.data.end_date = this.data.target_date = this.data.highlight_date = start;
+    setDate: function (start) {
+        // keep highlight/target_date in localtime
+        this.data.highlight_date = this.data.target_date = start.clone();
+        // set dates in UTC with timezone applied manually
+        this.data.start_date = this.data.end_date = start;
+        this.data.start_date.utc().add(this.getSession().getTZOffset(this.data.start_date), 'minutes');
+
         switch (this.data.scale) {
             case 'month':
                 this.data.start_date = this.data.start_date.clone().startOf('month').startOf('week');
@@ -267,9 +271,6 @@ return AbstractModel.extend({
             default:
                 this.data.start_date = this.data.start_date.clone().startOf('day');
                 this.data.end_date = this.data.end_date.clone().endOf('day');
-        }
-        if (highlight) {
-            this.data.highlight_date = this.data.target_date;
         }
     },
     setScale: function (scale) {
@@ -322,6 +323,7 @@ return AbstractModel.extend({
         // List authorized values for every field
         // fields with an active 'all' filter are skipped
         var authorizedValues = {};
+        var avoidValues = {};
 
         _.each(this.data.filters, function (filter) {
             // Skip 'all' filters because they do not affect the domain
@@ -329,11 +331,20 @@ return AbstractModel.extend({
 
             // Loop over subfilters to complete authorizedValues
             _.each(filter.filters, function (f) {
-                if (!authorizedValues[filter.fieldName])
-                    authorizedValues[filter.fieldName] = [];
+                if (filter.write_model) {
+                    if (!authorizedValues[filter.fieldName])
+                        authorizedValues[filter.fieldName] = [];
 
-                if (f.active) {
-                    authorizedValues[filter.fieldName].push(f.value);
+                    if (f.active) {
+                        authorizedValues[filter.fieldName].push(f.value);
+                    }
+                } else {
+                    if (!avoidValues[filter.fieldName])
+                        avoidValues[filter.fieldName] = [];
+
+                    if (!f.active) {
+                        avoidValues[filter.fieldName].push(f.value);
+                    }
                 }
             });
         });
@@ -342,6 +353,9 @@ return AbstractModel.extend({
         var domain = [];
         for (var field in authorizedValues) {
             domain.push([field, 'in', authorizedValues[field]]);
+        }
+        for (var field in avoidValues) {
+            domain.push([field, 'not in', avoidValues[field]]);
         }
 
         return domain;
@@ -367,17 +381,24 @@ return AbstractModel.extend({
             allDayText: _t("All day"),
             views: {
                 week: {
-                    columnFormat: 'ddd ' + time.strftime_to_moment_format(_t.database.parameters.date_format),
-                    titleFormat: time.strftime_to_moment_format(_t.database.parameters.time_format),
+                    columnFormat: 'ddd ' + time.getLangDateFormat(),
+                    titleFormat: time.getLangTimeFormat(),
                 }
             },
             monthNames: moment.months(),
             monthNamesShort: moment.monthsShort(),
             dayNames: moment.weekdays(),
             dayNamesShort: moment.weekdaysShort(),
-            firstDay: moment().startOf('week').isoWeekday(),
+            firstDay: moment()._locale._week.dow,
+            slotLabelFormat: _t.database.parameters.time_format.search("%H") != -1 ? 'H:mm': 'h(:mm)a',
         };
     },
+    /**
+     * Return a domain from the date range
+     *
+     * @private
+     * @returns {Array}
+     */
     _getRangeDomain: function () {
         // Build OpenERP Domain to filter object by this.mapping.date_start field
         // between given start, end dates.
@@ -522,6 +543,7 @@ return AbstractModel.extend({
             });
 
             var fs = [];
+            var undefined_fs = [];
             _.each(events, function (event) {
                 var data =  event.record[fieldName];
                 if (!_.contains(['many2many', 'one2many'], field.type)) {
@@ -531,15 +553,18 @@ return AbstractModel.extend({
                 }
                 _.each(data, function (_value) {
                     var value = _.isArray(_value) ? _value[0] : _value;
-                    fs.push({
+                    var f = {
                         'color_index': self.model_color === (field.relation || element.model) ? value : false,
                         'value': value,
-                        'label': fieldUtils.format[field.type](_value, field),
+                        'label': fieldUtils.format[field.type](_value, field) || _t("Undefined"),
                         'avatar_model': field.relation || element.model,
-                    });
+                    };
+                    // if field used as color does not have value then push filter in undefined_fs,
+                    // such filters should come last in filter list with Undefined string, later merge it with fs
+                    value ? fs.push(f) : undefined_fs.push(f);
                 });
             });
-            _.each(fs, function (f) {
+            _.each(_.union(fs, undefined_fs), function (f) {
                 var f1 = _.findWhere(filter.filters, f);
                 if (f1) {
                     f1.display = true;
@@ -594,7 +619,8 @@ return AbstractModel.extend({
         var date_start;
         var date_stop;
         var date_delay = evt[this.mapping.date_delay] || 1.0,
-            all_day = this.mapping.all_day ? evt[this.mapping.all_day] : false,
+            all_day = this.fields[this.mapping.date_start].type === 'date' ||
+                this.mapping.all_day && evt[this.mapping.all_day] || false,
             the_title = '',
             attendees = [];
 
@@ -610,14 +636,14 @@ return AbstractModel.extend({
             date_stop = date_start.clone().add(date_delay,'hours');
         }
 
-        date_start.add(this.getSession().getTZOffset(date_start), 'minutes');
-        date_stop.add(this.getSession().getTZOffset(date_stop), 'minutes');
+        if (!all_day) {
+            date_start.add(this.getSession().getTZOffset(date_start), 'minutes');
+            date_stop.add(this.getSession().getTZOffset(date_stop), 'minutes');
+        }
 
         if (this.mapping.all_day && evt[this.mapping.all_day]) {
             date_stop.add(1, 'days');
         }
-        var isAllDay = this.fields[this.mapping.date_start].type === 'date' ||
-                        this.mapping.all_day && evt[this.mapping.all_day] || false;
         var r = {
             'record': evt,
             'start': date_start,
@@ -625,7 +651,7 @@ return AbstractModel.extend({
             'r_start': date_start,
             'r_end': date_stop,
             'title': the_title,
-            'allDay': isAllDay,
+            'allDay': all_day,
             'id': evt.id,
             'attendees':attendees,
         };

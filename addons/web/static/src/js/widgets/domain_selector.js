@@ -177,9 +177,12 @@ var DomainTree = DomainNode.extend({
      * operator from the domain.
      * @see DomainTree._addFlattenedChildren
      */
-    init: function (parent, model, domain, options) {
+    init: function (parent, model, domain) {
         this._super.apply(this, arguments);
-        this._initialize(Domain.prototype.stringToArray(domain));
+        var parsedDomain = this._parseDomain(domain);
+        if (parsedDomain) {
+            this._initialize(parsedDomain);
+        }
     },
     /**
      * @see DomainNode.start
@@ -377,6 +380,23 @@ var DomainTree = DomainNode.extend({
             });
         }).bind(this));
     },
+    /**
+     * @param {string} domain
+     * @returns {Array[]}
+     */
+    _parseDomain: function (domain) {
+        var parsedDomain = false;
+        try {
+            parsedDomain = Domain.prototype.stringToArray(domain);
+            this.invalidDomain = false;
+        } catch (err) {
+            // TODO: domain could contain `parent` for example, which is
+            // currently not handled by the DomainSelector
+            this.invalidDomain = true;
+            this.children = [];
+        }
+        return parsedDomain;
+    },
 
     //--------------------------------------------------------------------------
     // Handlers
@@ -443,6 +463,16 @@ var DomainSelector = DomainTree.extend({
         domain_changed: "_onDomainChange",
     }),
 
+    start: function () {
+        var self = this;
+        return this._super.apply(this, arguments).then(function () {
+            if (self.invalidDomain) {
+                var msg = _t("This domain is not supported.");
+                self.$el.html(msg);
+            }
+        });
+    },
+
     //--------------------------------------------------------------------------
     // Public
     //--------------------------------------------------------------------------
@@ -452,14 +482,17 @@ var DomainSelector = DomainTree.extend({
      * If the internal domain value was already equal to the given one, this
      * does nothing.
      *
-     * @param {Array|string} domain
+     * @param {string} domain
      * @returns {Deferred} resolved when the rerendering is finished
      */
     setDomain: function (domain) {
-        if (Domain.prototype.arrayToString(domain) === Domain.prototype.arrayToString(this.getDomain())) {
+        if (domain === Domain.prototype.arrayToString(this.getDomain())) {
             return $.when();
         }
-        return this._redraw(domain);
+        var parsedDomain = this._parseDomain(domain);
+        if (parsedDomain) {
+            return this._redraw(parsedDomain);
+        }
     },
 
     //--------------------------------------------------------------------------
@@ -805,7 +838,7 @@ var DomainLeaf = DomainNode.extend({
             if (_.isBoolean(this.value)) {
                 this.value = "";
             } else if (_.isObject(this.value) && !_.isArray(this.value)) { // Can be object if parsed to x2x representation
-                this.value = this.value.id || "";
+                this.value = this.value.id || value || "";
             }
         }
 

@@ -8,6 +8,7 @@ import werkzeug.urls
 import requests
 
 from odoo import api, fields, models, exceptions
+from odoo.tools import pycompat
 
 _logger = logging.getLogger(__name__)
 
@@ -57,8 +58,10 @@ def jsonrpc(url, method='call', params=None):
                 e_class = InsufficientCreditError
             elif name == 'AccessError':
                 e_class = exceptions.AccessError
-            else:
+            elif name == 'UserError':
                 e_class = exceptions.UserError
+            else:
+                raise requests.exceptions.ConnectionError()
             e = e_class(message)
             e.data = response['error']['data']
             raise e
@@ -69,6 +72,11 @@ def jsonrpc(url, method='call', params=None):
 #----------------------------------------------------------
 # Helpers for proxy
 #----------------------------------------------------------
+class IapTransaction(object):
+
+    def __init__(self):
+        self.credit = None
+
 @contextlib.contextmanager
 def charge(env, key, account_token, credit, description=None, credit_template=None):
     """
@@ -79,9 +87,16 @@ def charge(env, key, account_token, credit, description=None, credit_template=No
     :param str key: service identifier
     :param str account_token: user identifier
     :param int credit: cost of the body's operation
-    :param str description:
+    :param description: a description of the purpose of the charge,
+                        the user will be able to see it in their
+                        dashboard
+    :type description: str
+    :param credit_template: a QWeb template to render and show to the
+                            user if their account does not have enough
+                            credits for the requested operation
+    :type credit_template: str
     """
-    end_point = get_endpoint(env)
+    endpoint = get_endpoint(env)
     params = {
         'account_token': account_token,
         'credit': credit,
@@ -93,24 +108,27 @@ def charge(env, key, account_token, credit, description=None, credit_template=No
     except InsufficientCreditError as e:
         if credit_template:
             arguments = json.loads(e.args[0])
-            arguments['body'] = env['ir.qweb'].render(credit_template)
+            arguments['body'] = pycompat.to_text(env['ir.qweb'].render(credit_template))
             e.args = (json.dumps(arguments),)
-
+        raise e
     try:
-        yield
+        transaction = IapTransaction()
+        transaction.credit = credit
+        yield transaction
     except Exception as e:
         params = {
             'token': transaction_token,
             'key': key,
         }
-        r = jsonrpc(end_point + '/iap/1/cancel', params=params)
+        r = jsonrpc(endpoint + '/iap/1/cancel', params=params)
         raise e
     else:
         params = {
             'token': transaction_token,
             'key': key,
+            'credit_to_capture': transaction.credit,
         }
-        r = jsonrpc(end_point + '/iap/1/capture', params=params) # noqa
+        r = jsonrpc(endpoint + '/iap/1/capture', params=params) # noqa
 
 
 #----------------------------------------------------------

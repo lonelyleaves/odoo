@@ -24,9 +24,8 @@ class MrpBom(models.Model):
         help="If the active field is set to False, it will allow you to hide the bills of material without removing it.")
     type = fields.Selection([
         ('normal', 'Manufacture this product'),
-        ('phantom', 'Ship this product as a set of components (kit)')], 'BoM Type',
-        default='normal', required=True,
-        help="Kit (Phantom): When processing a sales order for this product, the delivery order will contain the raw materials, instead of the finished product.")
+        ('phantom', 'Kit')], 'BoM Type',
+        default='normal', required=True)
     product_tmpl_id = fields.Many2one(
         'product.template', 'Product',
         domain="[('type', 'in', ['product', 'consu'])]", required=True)
@@ -81,6 +80,13 @@ class MrpBom(models.Model):
     def onchange_product_tmpl_id(self):
         if self.product_tmpl_id:
             self.product_uom_id = self.product_tmpl_id.uom_id.id
+            if self.product_id.product_tmpl_id != self.product_tmpl_id:
+                self.product_id = False
+
+    @api.onchange('routing_id')
+    def onchange_routing_id(self):
+        for line in self.bom_line_ids:
+            line.operation_id = False
 
     @api.multi
     def name_get(self):

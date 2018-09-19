@@ -34,11 +34,10 @@ class SaleOrder(models.Model):
     procurement_group_id = fields.Many2one('procurement.group', 'Procurement Group', copy=False)
 
     @api.multi
-    def action_confirm(self):
-        result = super(SaleOrder, self).action_confirm()
+    def _action_confirm(self):
+        super(SaleOrder, self)._action_confirm()
         for order in self:
             order.order_line._action_launch_procurement_rule()
-        return result
 
     @api.depends('picking_ids')
     def _compute_picking_ids(self):
@@ -127,14 +126,20 @@ class SaleOrderLine(models.Model):
                     and all(move.state in ['done', 'cancel'] for move in line.move_ids):
                 line.invoice_status = 'invoiced'
 
+    @api.depends('move_ids')
+    def _compute_product_updatable(self):
+        for line in self:
+            if not line.move_ids.filtered(lambda m: m.state != 'cancel'):
+                super(SaleOrderLine, line)._compute_product_updatable()
+            else:
+                line.product_updatable = False
+
     @api.multi
     @api.depends('product_id')
     def _compute_qty_delivered_updateable(self):
         for line in self:
             if line.product_id.type not in ('consu', 'product'):
                 super(SaleOrderLine, line)._compute_qty_delivered_updateable()
-            else:
-                line.qty_delivered_updateable = False
 
     @api.onchange('product_id')
     def _onchange_product_id_set_customer_lead(self):
@@ -158,7 +163,10 @@ class SaleOrderLine(models.Model):
             return {}
         if self.product_id.type == 'product':
             precision = self.env['decimal.precision'].precision_get('Product Unit of Measure')
-            product = self.product_id.with_context(warehouse=self.order_id.warehouse_id.id)
+            product = self.product_id.with_context(
+                warehouse=self.order_id.warehouse_id.id,
+                lang=self.order_id.partner_id.lang or self.env.user.lang or 'en_US'
+            )
             product_qty = self.product_uom._compute_quantity(self.product_uom_qty, self.product_id.uom_id)
             if float_compare(product.virtual_available, product_qty, precision_digits=precision) == -1:
                 is_available = self._check_routing()
@@ -212,6 +220,13 @@ class SaleOrderLine(models.Model):
         })
         return values
 
+    def _get_qty_procurement(self):
+        self.ensure_one()
+        qty = 0.0
+        for move in self.move_ids.filtered(lambda r: r.state != 'cancel'):
+            qty += move.product_uom._compute_quantity(move.product_uom_qty, self.product_uom, rounding_method='HALF-UP')
+        return qty
+
     @api.multi
     def _action_launch_procurement_rule(self):
         """
@@ -224,22 +239,41 @@ class SaleOrderLine(models.Model):
         for line in self:
             if line.state != 'sale' or not line.product_id.type in ('consu','product'):
                 continue
-            qty = 0.0
-            for move in line.move_ids:
-                qty += move.product_qty
+            qty = line._get_qty_procurement()
             if float_compare(qty, line.product_uom_qty, precision_digits=precision) >= 0:
                 continue
 
-            if not line.order_id.procurement_group_id:
-                line.order_id.procurement_group_id = self.env['procurement.group'].create({
+            group_id = line.order_id.procurement_group_id
+            if not group_id:
+                group_id = self.env['procurement.group'].create({
                     'name': line.order_id.name, 'move_type': line.order_id.picking_policy,
                     'sale_id': line.order_id.id,
                     'partner_id': line.order_id.partner_shipping_id.id,
                 })
-            values = line._prepare_procurement_values(group_id=line.order_id.procurement_group_id)
+                line.order_id.procurement_group_id = group_id
+            else:
+                # In case the procurement group is already created and the order was
+                # cancelled, we need to update certain values of the group.
+                updated_vals = {}
+                if group_id.partner_id != line.order_id.partner_shipping_id:
+                    updated_vals.update({'partner_id': line.order_id.partner_shipping_id.id})
+                if group_id.move_type != line.order_id.picking_policy:
+                    updated_vals.update({'move_type': line.order_id.picking_policy})
+                if updated_vals:
+                    group_id.write(updated_vals)
+
+            values = line._prepare_procurement_values(group_id=group_id)
             product_qty = line.product_uom_qty - qty
+
+            procurement_uom = line.product_uom
+            quant_uom = line.product_id.uom_id
+            get_param = self.env['ir.config_parameter'].sudo().get_param
+            if procurement_uom.id != quant_uom.id and get_param('stock.propagate_uom') != '1':
+                product_qty = line.product_uom._compute_quantity(product_qty, quant_uom, rounding_method='HALF-UP')
+                procurement_uom = quant_uom
+
             try:
-                self.env['procurement.group'].run(line.product_id, product_qty, line.product_uom, line.order_id.partner_shipping_id.property_stock_customer, line.name, line.order_id.name, values)
+                self.env['procurement.group'].run(line.product_id, product_qty, procurement_uom, line.order_id.partner_shipping_id.property_stock_customer, line.name, line.order_id.name, values)
             except UserError as error:
                 errors.append(error.name)
         if errors:
@@ -313,8 +347,8 @@ class SaleOrderLine(models.Model):
             raise UserError('You cannot decrease the ordered quantity below the delivered quantity.\n'
                             'Create a return first.')
         for line in self:
-            pickings = self.order_id.picking_ids.filtered(lambda p: p.state not in ('done', 'cancel'))
+            pickings = line.order_id.picking_ids.filtered(lambda p: p.state not in ('done', 'cancel'))
             for picking in pickings:
                 picking.message_post("The quantity of %s has been updated from %d to %d in %s" %
-                                      (line.product_id.name, line.product_uom_qty, values['product_uom_qty'], self.order_id.name))
+                                      (line.product_id.display_name, line.product_uom_qty, values['product_uom_qty'], line.order_id.name))
         super(SaleOrderLine, self)._update_line_quantity(values)

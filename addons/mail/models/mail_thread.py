@@ -126,7 +126,8 @@ class MailThread(models.AbstractModel):
         followers = self.env['mail.followers'].sudo().search([
             ('res_model', '=', self._name),
             ('partner_id', operator, operand)])
-        return [('id', 'in', followers.mapped('res_id'))]
+        # using read() below is much faster than followers.mapped('res_id')
+        return [('id', 'in', [res['res_id'] for res in followers.read(['res_id'])])]
 
     @api.model
     def _search_follower_channels(self, operator, operand):
@@ -139,7 +140,8 @@ class MailThread(models.AbstractModel):
         followers = self.env['mail.followers'].sudo().search([
             ('res_model', '=', self._name),
             ('channel_id', operator, operand)])
-        return [('id', 'in', followers.mapped('res_id'))]
+        # using read() below is much faster than followers.mapped('res_id')
+        return [('id', 'in', [res['res_id'] for res in followers.read(['res_id'])])]
 
     @api.multi
     @api.depends('message_follower_ids')
@@ -149,7 +151,8 @@ class MailThread(models.AbstractModel):
             ('res_id', 'in', self.ids),
             ('partner_id', '=', self.env.user.partner_id.id),
             ])
-        following_ids = followers.mapped('res_id')
+        # using read() below is much faster than followers.mapped('res_id')
+        following_ids = [res['res_id'] for res in followers.read(['res_id'])]
         for record in self:
             record.message_is_follower = record.id in following_ids
 
@@ -161,9 +164,11 @@ class MailThread(models.AbstractModel):
             ])
         # Cases ('message_is_follower', '=', True) or  ('message_is_follower', '!=', False)
         if (operator == '=' and operand) or (operator == '!=' and not operand):
-            return [('id', 'in', followers.mapped('res_id'))]
+            # using read() below is much faster than followers.mapped('res_id')
+            return [('id', 'in', [res['res_id'] for res in followers.read(['res_id'])])]
         else:
-            return [('id', 'not in', followers.mapped('res_id'))]
+            # using read() below is much faster than followers.mapped('res_id')
+            return [('id', 'not in', [res['res_id'] for res in followers.read(['res_id'])])]
 
     @api.multi
     def _get_message_unread(self):
@@ -177,10 +182,10 @@ class MailThread(models.AbstractModel):
                              RIGHT JOIN mail_channel_partner cp
                              ON (cp.channel_id = rel.mail_channel_id AND cp.partner_id = %s AND
                                 (cp.seen_message_id IS NULL OR cp.seen_message_id < msg.id))
-                             WHERE msg.model = %s AND msg.res_id in %s AND
+                             WHERE msg.model = %s AND msg.res_id = ANY(%s) AND
                                    (msg.author_id IS NULL OR msg.author_id != %s) AND
                                    (msg.message_type != 'notification' OR msg.model != 'mail.channel')""",
-                         (partner_id, self._name, tuple(self.ids) or (None,), partner_id,))
+                         (partner_id, self._name, list(self.ids), partner_id,))
         for result in self._cr.fetchall():
             res[result[0]] += 1
 
@@ -344,7 +349,9 @@ class MailThread(models.AbstractModel):
                         'email_link': email_link
                     }
                 }
-            return "%(static_help)s<p>%(dyn_help)s" % {
+            # do not add alias two times if it was added previously
+            if not help or help.find("oe_view_nocontent_alias") == -1:
+                return '%(static_help)s<p class="oe_view_nocontent_alias">%(dyn_help)s</p>' % {
                     'static_help': help or '',
                     'dyn_help': _("You could also add a new %(document)s by sending an email to: %(email_link)s.") %  {
                         'document': document_name,
@@ -665,7 +672,7 @@ class MailThread(models.AbstractModel):
 
         if message.model:
             model_name = self.env['ir.model']._get(message.model).display_name
-            view_title = '%s %s' % (_('View'), model_name)
+            view_title = _('View %s') % model_name
         else:
             view_title = _('View')
 
@@ -829,11 +836,13 @@ class MailThread(models.AbstractModel):
 
     def _routing_warn(self, error_message, warn_suffix, message_id, route, raise_exception):
         """ Tools method used in message_route_verify: whether to log a warning or raise an error """
-        full_message = _('Routing mail with Message-Id %s: route %s: %s') % (message_id, route, error_message)
+        short_message = _("Mailbox unavailable - %s") % error_message
+        full_message = ('Routing mail with Message-Id %s: route %s: %s' %
+                        (message_id, route, error_message))
+        _logger.info(full_message + (warn_suffix and '; %s' % warn_suffix or ''))
         if raise_exception:
-            raise ValueError(full_message)
-        else:
-            _logger.info(full_message + warn_suffix and '; %s' % warn_suffix or '')
+            # sender should not see private diagnostics info, just the error
+            raise ValueError(short_message)
 
     def _routing_create_bounce_email(self, email_from, body_html, message):
         bounce_to = tools.decode_message_header(message, 'Return-Path') or email_from
@@ -956,9 +965,10 @@ class MailThread(models.AbstractModel):
                 obj = self.env[alias.alias_parent_model_id.model].browse(alias.alias_parent_thread_id)
             elif model:
                 obj = self.env[model]
-            if not hasattr(obj, '_alias_check_contact'):
-                obj = self.env['mail.alias.mixin']
-            check_result = obj._alias_check_contact(message, message_dict, alias)
+            if hasattr(obj, '_alias_check_contact'):
+                check_result = obj._alias_check_contact(message, message_dict, alias)
+            else:
+                check_result = self.env['mail.alias.mixin']._alias_check_contact_on_record(obj, message, message_dict, alias)
             if check_result is not True:
                 self._routing_warn(_('alias %s: %s') % (alias.alias_name, check_result.get('error_message', _('unknown error'))), _('skipping'), message_id, route, False)
                 self._routing_create_bounce_email(email_from, check_result.get('error_template', _generic_bounce_body_html), message)
@@ -1368,7 +1378,15 @@ class MailThread(models.AbstractModel):
         mail module, and should not contain security or generic html cleaning.
         Indeed those aspects should be covered by the html_sanitize method
         located in tools. """
-        root = lxml.html.fromstring(body)
+        if not body:
+            return body, attachments
+        try:
+            root = lxml.html.fromstring(body)
+        except ValueError:
+            # In case the email client sent XHTML, fromstring will fail because 'Unicode strings
+            # with encoding declaration are not supported'.
+            root = lxml.html.fromstring(body.encode('utf-8'))
+
         postprocessed = False
         to_remove = []
         for node in root.iter():
@@ -1387,6 +1405,7 @@ class MailThread(models.AbstractModel):
             node.getparent().remove(node)
         if postprocessed:
             body = etree.tostring(root, pretty_print=False, encoding='UTF-8')
+            body = pycompat.to_native(body)
         return body, attachments
 
     def _message_extract_payload(self, message, save_original=False):
@@ -1402,7 +1421,7 @@ class MailThread(models.AbstractModel):
         # Content-Type: multipart/related;
         #   boundary="_004_3f1e4da175f349248b8d43cdeb9866f1AMSPR06MB343eurprd06pro_";
         #   type="text/html"
-        if not message.is_multipart() or message.get('content-type', '').startswith("text/"):
+        if message.get_content_maintype() == 'text':
             encoding = message.get_content_charset()
             body = message.get_payload(decode=True)
             body = tools.ustr(body, encoding, errors='replace')
@@ -1495,10 +1514,8 @@ class MailThread(models.AbstractModel):
             'message_type': 'email',
         }
         if not isinstance(message, Message):
-            # message_from_string works on a native str, so on py2 we need to
-            # encode incoming unicode strings
-            if pycompat.PY2 and not isinstance(message, str):
-                message = message.encode('utf-8')
+            # message_from_string works on a native str
+            message = pycompat.to_native(message)
             message = email.message_from_string(message)
 
         message_id = message['message-id']
@@ -1728,6 +1745,8 @@ class MailThread(models.AbstractModel):
                 continue
             if isinstance(content, pycompat.text_type):
                 content = content.encode('utf-8')
+            elif content is None:
+                continue
             data_attach = {
                 'name': name,
                 'datas': base64.b64encode(content),
@@ -1753,7 +1772,8 @@ class MailThread(models.AbstractModel):
                     if not attachment:
                         attachment = fname_mapping.get(node.get('data-filename'), '')
                     if attachment:
-                        node.set('src', '/web/image/%s' % attachment.id)
+                        attachment.generate_access_token()
+                        node.set('src', '/web/image/%s?access_token=%s' % (attachment.id, attachment.access_token))
                         postprocessed = True
             if postprocessed:
                 body = lxml.html.tostring(root, pretty_print=False, encoding='UTF-8')
@@ -2146,7 +2166,7 @@ class MailThread(models.AbstractModel):
                         new_channels.setdefault(header_follower.channel_id.id, set()).add(new_subtype.id)
 
         # add followers coming from res.users relational fields that are tracked
-        to_add_users = self.env['res.users'].sudo().browse([values[name] for name in user_field_lst if values.get(name)])
+        to_add_users = self.env['res.users'].sudo().browse([values[name] for name in user_field_lst if values.get(name)]).filtered(lambda u: u.partner_id.active)
         for partner in to_add_users.mapped('partner_id'):
             new_partners.setdefault(partner.id, None)
 

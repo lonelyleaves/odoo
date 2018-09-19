@@ -2,7 +2,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 
 class ServerActions(models.Model):
@@ -29,6 +29,12 @@ class ServerActions(models.Model):
         if self.template_id and not self.template_id.email_from:
             raise UserError(_('Your template should define email_from'))
 
+    @api.constrains('state', 'model_id')
+    def _check_mail_thread(self):
+        for action in self:
+            if action.state == 'followers' and not action.model_id.is_mail_thread:
+                raise ValidationError(_("Add Followers can only be done on a mail thread model"))
+
     @api.model
     def run_action_followers_multi(self, action, eval_context=None):
         Model = self.env[action.model_id.model]
@@ -42,7 +48,11 @@ class ServerActions(models.Model):
         # TDE CLEANME: when going to new api with server action, remove action
         if not action.template_id or not self._context.get('active_id'):
             return False
-        action.template_id.send_mail(self._context.get('active_id'), force_send=False, raise_exception=False)
+        # Clean context from default_type to avoid making attachment
+        # with wrong values in subsequent operations
+        cleaned_ctx = dict(self.env.context)
+        cleaned_ctx.pop('default_type', None)
+        action.template_id.with_context(cleaned_ctx).send_mail(self._context.get('active_id'), force_send=False, raise_exception=False)
         return False
 
     @api.model

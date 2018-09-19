@@ -365,12 +365,6 @@ return core.Class.extend({
                                 child.attrs.modifiers.column_invisible || false;
                         }
                     });
-
-                    // detect editables list has they behave differently with respect
-                    // to the sorting (changes are not sorted directly)
-                    if (mode === 'list' && view.arch.attrs.editable) {
-                         attrs.keepChangesUnsorted = true;
-                    }
                 }
             }
             if (attrs.Widget.prototype.fieldsToFetch) {
@@ -388,6 +382,11 @@ return core.Class.extend({
                 }
             }
         }
+
+        if (attrs.Widget.prototype.fieldDependencies) {
+            attrs.fieldDependencies = attrs.Widget.prototype.fieldDependencies;
+        }
+
         return attrs;
     },
     /**
@@ -414,6 +413,19 @@ return core.Class.extend({
             if (node.tag === 'field') {
                 fieldsInfo[node.attrs.name] = self._processField(viewType,
                     fields[node.attrs.name], node.attrs ? _.clone(node.attrs) : {});
+
+                if (fieldsInfo[node.attrs.name].fieldDependencies) {
+                    var deps = fieldsInfo[node.attrs.name].fieldDependencies;
+                    for (var dependency_name in deps) {
+                        var dependency_dict = {name: dependency_name, type: deps[dependency_name].type};
+                        if (!(dependency_name in fieldsInfo)) {
+                            fieldsInfo[dependency_name] = _.extend({}, dependency_dict, {options: deps[dependency_name].options || {}});
+                        }
+                        if (!(dependency_name in fields)) {
+                            fields[dependency_name] = dependency_dict;
+                        }
+                    }
+                }
                 return false;
             }
             return node.tag !== 'arch';

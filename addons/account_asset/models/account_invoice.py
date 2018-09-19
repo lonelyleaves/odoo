@@ -3,7 +3,8 @@
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from odoo import api, fields, models
+from odoo import api, fields, models, _
+from odoo.exceptions import UserError
 from odoo.tools import DEFAULT_SERVER_DATE_FORMAT as DF
 
 from odoo.addons import decimal_precision as dp
@@ -11,6 +12,16 @@ from odoo.addons import decimal_precision as dp
 
 class AccountInvoice(models.Model):
     _inherit = 'account.invoice'
+
+    @api.model
+    def _refund_cleanup_lines(self, lines):
+        result = super(AccountInvoice, self)._refund_cleanup_lines(lines)
+        for i, line in enumerate(lines):
+            for name, field in line._fields.items():
+                if name == 'asset_category_id':
+                    result[i][2][name] = False
+                    break
+        return result
 
     @api.multi
     def action_cancel(self):

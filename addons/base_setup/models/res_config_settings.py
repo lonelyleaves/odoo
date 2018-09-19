@@ -19,7 +19,7 @@ class ResConfigSettings(models.TransientModel):
     module_google_drive = fields.Boolean("Attach Google documents to any record")
     module_google_spreadsheet = fields.Boolean("Google Spreadsheet")
     module_auth_oauth = fields.Boolean("Use external authentication providers (OAuth)")
-    module_auth_ldap = fields.Boolean("LDAP Authentification")
+    module_auth_ldap = fields.Boolean("LDAP Authentication")
     module_base_gengo = fields.Boolean("Translate Your Website with Gengo")
     module_inter_company_rules = fields.Boolean("Manage Inter Company")
     module_pad = fields.Boolean("Collaborative Pads")
@@ -90,6 +90,8 @@ class ResConfigSettings(models.TransientModel):
 
     @api.multi
     def edit_external_header(self):
+        if not self.external_report_layout:
+            return False
         return self._prepare_report_view_action('web.external_layout_' + self.external_report_layout)
 
     @api.multi

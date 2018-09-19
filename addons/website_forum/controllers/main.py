@@ -225,9 +225,9 @@ class WebsiteForum(http.Controller):
     @http.route('/forum/get_url_title', type='json', auth="user", methods=['POST'], website=True)
     def get_url_title(self, **kwargs):
         try:
-            req = requests.get(kwargs.get('url'), stream=True)
+            req = requests.get(kwargs.get('url'))
             req.raise_for_status()
-            arch = lxml.html.parse(req.raw)
+            arch = lxml.html.fromstring(req.content)
             return arch.find(".//title").text
         except IOError:
             return False
@@ -332,7 +332,7 @@ class WebsiteForum(http.Controller):
         if post_type == 'question' and not post.get('post_name', ''):
             return request.render('website.http_error', {'status_code': _('Bad Request'), 'status_message': _('Title should not be empty.')})
         if post.get('content', '') == '<p><br></p>':
-            return werkzeug.utils.redirect("/forum/%s/question/%s?nocontent=1" % (slug(forum), post_parent and slug(post_parent)))
+            return request.render('website.http_error', {'status_code': _('Bad Request'), 'status_message': _('Question should not be empty.')})
 
         post_tag_ids = forum._tag_to_write_vals(post.get('post_tags', ''))
 

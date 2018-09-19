@@ -44,7 +44,7 @@ body .modal {
         .o-w-preserve-modals();
         .o-w-preserve-tabs();
 
-        button.close {
+        &:not(.oe_mobile_preview) button.close {
             .o-w-close-icon(12px);
             margin-right: -2px;
         }
@@ -453,8 +453,13 @@ body .modal {
 }
 
 // Pages Management
-.o_page_management_info .o_switch{
-    padding-top: 7px;
+.o_page_management_info{
+    .o_switch{
+        padding-top: 7px;
+    }
+}
+.popover_dep{
+    overflow-x: auto;
 }
 #edit_website_pages{
     .fa-check{

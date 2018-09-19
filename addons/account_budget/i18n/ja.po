@@ -9,10 +9,10 @@
 # Manami Hashi <manami@roomsfor.hk>, 2017
 msgid ""
 msgstr ""
-"Project-Id-Version: Odoo Server 10.saas~18\n"
+"Project-Id-Version: Odoo Server 11.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2017-09-20 09:53+0000\n"
-"PO-Revision-Date: 2017-09-20 09:53+0000\n"
+"POT-Creation-Date: 2017-10-10 11:34+0000\n"
+"PO-Revision-Date: 2017-10-10 11:34+0000\n"
 "Last-Translator: Manami Hashi <manami@roomsfor.hk>, 2017\n"
 "Language-Team: Japanese (https://www.transifex.com/odoo/teams/41243/ja/)\n"
 "MIME-Version: 1.0\n"
@@ -32,7 +32,7 @@ msgstr ""
 "予算は、将来のある期間に期待されるあなたの会社の収入\n"
 "                 および/または経費の予測です。\n"
 "                 予算は、いくつかの財務勘定および/または分析勘定\n"
-"                 (プロジェクト、部門、製品のカテゴリなどを表す場合があります)に\n"
+"                 (プロジェクト、部門、プロダクトカテゴリなどを表す場合があります)に\n"
 "                 定義されています。"
 
 #. module: account_budget
@@ -287,10 +287,10 @@ msgid "Status"
 msgstr "ステータス"
 
 #. module: account_budget
-#: code:addons/account_budget/models/account_budget.py:89
+#: code:addons/account_budget/models/account_budget.py:31
 #, python-format
-msgid "The Budget '%s' has no accounts!"
-msgstr "予算 %s はアカウントを持っていません。"
+msgid "The budget must have at least one account."
+msgstr ""
 
 #. module: account_budget
 #: model:ir.model.fields,field_description:account_budget.field_crossovered_budget_lines_theoritical_amount

@@ -5,7 +5,12 @@ var core = require('web.core');
 var utils = require('web.utils');
 var time = require('web.time');
 
-function genericJsonRpc (fct_name, params, fct) {
+function genericJsonRpc (fct_name, params, settings, fct) {
+    var shadow = settings.shadow || false;
+    delete settings.shadow;
+    if (! shadow)
+        core.bus.trigger('rpc_request');
+
     var data = {
         jsonrpc: "2.0",
         method: fct_name,
@@ -30,11 +35,49 @@ function genericJsonRpc (fct_name, params, fct) {
     });
     // FIXME: jsonp?
     result.abort = function () { if (xhr.abort) xhr.abort(); };
-    return result;
+
+    var p = result.then(function (result) {
+        if (!shadow) {
+            core.bus.trigger('rpc_response');
+        }
+        return result;
+    }, function (type, error, textStatus, errorThrown) {
+        if (type === "server") {
+            if (!shadow) {
+                core.bus.trigger('rpc_response');
+            }
+            if (error.code === 100) {
+                core.bus.trigger('invalidate_session');
+            }
+            return $.Deferred().reject(error, $.Event());
+        } else {
+            if (!shadow) {
+                core.bus.trigger('rpc_response_failed');
+            }
+            var nerror = {
+                code: -32098,
+                message: "XmlHttpRequestError " + errorThrown,
+                data: {
+                    type: "xhr"+textStatus,
+                    debug: error.responseText,
+                    objects: [error, errorThrown]
+                },
+            };
+            return $.Deferred().reject(nerror, $.Event());
+        }
+    });
+    return p.fail(function () { // Allow deferred user to disable rpc_error call in fail
+        p.fail(function (error, event) {
+            if (!event.isDefaultPrevented()) {
+                core.bus.trigger('rpc_error', error, event);
+            }
+        });
+    });
 }
 
 function jsonRpc(url, fct_name, params, settings) {
-    return genericJsonRpc(fct_name, params, function(data) {
+    settings = settings || {};
+    return genericJsonRpc(fct_name, params, settings, function(data) {
         return $.ajax(url, _.extend({}, settings, {
             url: url,
             dataType: 'json',
@@ -47,7 +90,7 @@ function jsonRpc(url, fct_name, params, settings) {
 
 function jsonpRpc(url, fct_name, params, settings) {
     settings = settings || {};
-    return genericJsonRpc(fct_name, params, function(data) {
+    return genericJsonRpc(fct_name, params, settings, function(data) {
         var payload_str = JSON.stringify(data, time.date_to_utc);
         var payload_url = $.param({r:payload_str});
         var force2step = settings.force2step || false;
@@ -212,6 +255,9 @@ var loadJS = (function () {
  * @param {Function} [options.success] callback in case of download success
  * @param {Function} [options.error] callback in case of request error, provided with the error body
  * @param {Function} [options.complete] called after both ``success`` and ``error`` callbacks have executed
+ * @returns {boolean} a false value means that a popup window was blocked. This
+ *   mean that we probably need to inform the user that something needs to be
+ *   changed to make it work.
  */
 function get_file(options) {
     // need to detect when the file is done downloading (not used
@@ -232,7 +278,12 @@ function get_file(options) {
         var url = options.session.url(options.url, params);
         if (options.complete) { options.complete(); }
 
-        return window.open(url);
+        var w = window.open(url);
+        if (!w || w.closed || typeof w.closed === 'undefined') {
+            // popup was blocked
+            return false;
+        }
+        return true;
     }
 
     var $form, $form_data = $('<div>');
@@ -252,8 +303,20 @@ function get_file(options) {
                 if (options.error) {
                     var body = this.contentDocument.body;
                     var nodes = body.children.length === 0 ? body.childNodes : body.children;
-                    var node = nodes[1] || nodes[0];
-                    options.error(JSON.parse(node.textContent));
+                    var errorParams = {};
+
+                    try { // Case of a serialized Odoo Exception: It is Json Parsable
+                        var node = nodes[1] || nodes[0];
+                        errorParams = JSON.parse(node.textContent);
+                    } catch (e) { // Arbitrary uncaught python side exception
+                        errorParams = {
+                            message: nodes.length > 1 ? nodes[1].textContent : '',
+                            data: {
+                                title: nodes.length > 0 ? nodes[0].textContent : '',
+                            }
+                        }
+                    }
+                    options.error(errorParams);
                 }
             } finally {
                 complete();
@@ -309,6 +372,7 @@ function get_file(options) {
         }
     };
     timer = setTimeout(waitLoop, CHECK_INTERVAL);
+    return true;
 };
 
 function post (controller_url, data) {

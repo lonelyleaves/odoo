@@ -460,7 +460,7 @@ def quote(s):
                      .replace('\n', '\\n"\n"')
 
 re_escaped_char = re.compile(r"(\\.)")
-re_escaped_replacements = {'n': '\n', }
+re_escaped_replacements = {'n': '\n', 't': '\t',}
 
 def _sub_replacement(match_obj):
     return re_escaped_replacements.get(match_obj.group(1)[1], match_obj.group(1)[1])
@@ -584,8 +584,11 @@ class PoFile(object):
                 # end of this next() call), and keep the others to generate
                 # additional entries (returned the next next() calls).
                 trans_type, name, res_id = targets.pop(0)
+                code = trans_type == 'code'
                 for t, n, r in targets:
-                    if t == trans_type == 'code': continue
+                    if t == 'code' and code: continue
+                    if t == 'code':
+                        code = True
                     self.extra_lines.append((t, n, r, source, trad, comments))
 
         if name is None:
@@ -696,7 +699,7 @@ def trans_export(lang, modules, buffer, format, cr):
                 tmpmoddir = join(tmpdir, mod, 'i18n')
                 os.makedirs(tmpmoddir)
                 pofilename = (lang if lang else mod) + ".po" + ('t' if not lang else '')
-                buf = open(join(tmpmoddir, pofilename), 'w')
+                buf = open(join(tmpmoddir, pofilename), 'wb')
                 _process('po', [mod], modrows, buf, lang)
                 buf.close()
 
@@ -932,7 +935,8 @@ def trans_generate(lang, modules, cr):
     def get_module_from_path(path):
         for (mp, rec) in path_list:
             mp = os.path.join(mp, '')
-            if rec and path.startswith(mp) and os.path.dirname(path) != mp:
+            dirname = os.path.join(os.path.dirname(path), '')
+            if rec and path.startswith(mp) and dirname != mp:
                 path = path[len(mp):]
                 return path.split(os.path.sep)[0]
         return 'base' # files that are not in a module are considered as being in 'base' module
@@ -1043,7 +1047,9 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
 
             # Make a reader for the POT file and be somewhat defensive for the
             # stable branch.
-            if fileobj.name.endswith('.po'):
+
+            # when fileobj is a TemporaryFile, its name is an interget in P3, a string in P2
+            if isinstance(fileobj.name, str) and fileobj.name.endswith('.po'):
                 try:
                     # Normally the path looks like /path/to/xxx/i18n/lang.po
                     # and we try to find the corresponding
@@ -1073,7 +1079,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
         for type, name, res_id, src, _ignored, comments in pot_reader:
             if type is not None:
                 target = pot_targets[src]
-                target.targets.add((type, name, res_id))
+                target.targets.add((type, name, type != 'code' and res_id or 0))
                 target.comments = comments
 
         # read the rest of the file
@@ -1094,11 +1100,11 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
             if src in pot_targets:
                 target = pot_targets[src]
                 target.value = dic['value']
-                target.targets.discard((dic['type'], dic['name'], dic['res_id']))
+                target.targets.discard((dic['type'], dic['name'], dic['type'] != 'code' and dic['res_id'] or 0))
 
             # This would skip terms that fail to specify a res_id
             res_id = dic['res_id']
-            if not res_id:
+            if not res_id and dic['type'] != 'code':
                 return
 
             if isinstance(res_id, pycompat.integer_types) or \

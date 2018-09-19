@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from werkzeug import url_encode
-
 from odoo import http, _
+from odoo.addons.portal.controllers.portal import _build_url_w_params
 from odoo.http import request, route
 
 
@@ -18,7 +17,6 @@ class PaymentPortal(http.Controller):
         :return html: form containing all values related to the acquirer to
                       redirect customers to the acquirer website """
         success_url = kwargs.get('success_url', '/my')
-        callback_method = kwargs.get('callback_method', '')
 
         order_sudo = request.env['sale.order'].sudo().browse(order_id)
         if not order_sudo:
@@ -29,17 +27,19 @@ class PaymentPortal(http.Controller):
         except:
             return False
 
+        # we check if the order need to create a payment token
+        save_token = save_token or order_sudo._get_payment_type() == "form_save"
+
+        if request.env.user._is_public():
+            save_token = False
+
         token = request.env['payment.token'].sudo()  # currently no support of payment tokens
         tx = request.env['payment.transaction'].sudo()._check_or_create_sale_tx(
             order_sudo,
             acquirer,
             payment_token=token,
             tx_type='form_save' if save_token else 'form',
-            add_tx_values={
-                'callback_model_id': request.env['ir.model'].sudo().search([('model', '=', order_sudo._name)], limit=1).id,
-                'callback_res_id': order_sudo.id,
-                'callback_method': callback_method,
-            })
+        )
 
         # set the transaction id into the session
         request.session['portal_sale_%s_transaction_id' % order_sudo.id] = tx.id
@@ -59,24 +59,25 @@ class PaymentPortal(http.Controller):
         """ Use a token to perform a s2s transaction """
         error_url = kwargs.get('error_url', '/my')
         success_url = kwargs.get('success_url', '/my')
-        callback_method = kwargs.get('callback_method', '')
         access_token = kwargs.get('access_token')
         params = {}
         if access_token:
             params['access_token'] = access_token
 
-        order_sudo = request.env['sale.order'].sudo().browse(order_id)
+        order_sudo = request.env['sale.order'].sudo().browse(order_id).exists()
         if not order_sudo:
             params['error'] = 'pay_sale_invalid_doc'
-            return request.redirect('%s?%s' % (error_url, url_encode(params)))
+            return request.redirect(_build_url_w_params(error_url, params))
 
         try:
             token = request.env['payment.token'].sudo().browse(int(pm_id))
         except (ValueError, TypeError):
             token = False
-        if not token:
+
+        token_owner = order_sudo.partner_id if request.env.user._is_public() else request.env.user.partner_id
+        if not token or token.partner_id != token_owner:
             params['error'] = 'pay_sale_invalid_token'
-            return request.redirect('%s?%s' % (error_url, url_encode(params)))
+            return request.redirect(_build_url_w_params(error_url, params))
 
         # find an existing tx or create a new one
         tx = request.env['payment.transaction'].sudo()._check_or_create_sale_tx(
@@ -84,20 +85,16 @@ class PaymentPortal(http.Controller):
             token.acquirer_id,
             payment_token=token,
             tx_type='server2server',
-            add_tx_values={
-                'callback_model_id': request.env['ir.model'].sudo().search([('model', '=', order_sudo._name)], limit=1).id,
-                'callback_res_id': order_sudo.id,
-                'callback_method': callback_method,
-            })
+        )
 
         # set the transaction id into the session
         request.session['portal_sale_%s_transaction_id' % order_sudo.id] = tx.id
 
         # proceed to the payment
         res = tx.confirm_sale_token()
-        if res is not True:
-            params['error'] = res
-            return request.redirect('%s?%s' % (error_url, url_encode(params)))
-
-        params['success'] = 'pay_sale'
-        return request.redirect('%s?%s' % (success_url, url_encode(params)))
+        if tx.state != 'authorized' or not tx.acquirer_id.capture_manually:
+            if res is not True:
+                params['error'] = res
+                return request.redirect(_build_url_w_params(error_url, params))
+            params['success'] = 'pay_sale'
+        return request.redirect(_build_url_w_params(success_url, params))

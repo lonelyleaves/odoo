@@ -54,8 +54,13 @@ ListRenderer.include({
      * @returns {Deferred}
      */
     start: function () {
-        if (this.mode === 'edit') {
-            this.$el.css({height: '100%'});
+        // deliberately use the 'editable' attribute instead of '_isEditable'
+        // function, because the groupBy must not be taken into account to
+        // enable the '_onWindowClicked' handler (otherwise, an editable grouped
+        // list which is reloaded without groupBy wouldn't have this handler
+        // bound, and edited rows couldn't be left by clicking outside the list)
+        if (this.editable) {
+            this.$el.css({height: '100%'}); // seems useless: to remove in master
             core.bus.on('click', this, this._onWindowClicked.bind(this));
         }
         return this._super();
@@ -101,6 +106,7 @@ ListRenderer.include({
                 });
                 var $row = self.$('.o_data_row:nth(' + rowIndex + ')');
                 self._setDecorationClasses(state.data[rowIndex], $row);
+                self._updateFooter();
             }
             return widgets;
         });
@@ -136,7 +142,9 @@ ListRenderer.include({
             currentRowID = this.state.data[this.currentRow].id;
             currentWidget = this.allFieldWidgets[currentRowID][this.currentFieldIndex];
             focusedElement = currentWidget.getFocusableElement().get(0);
-            selectionRange = dom.getSelectionRange(focusedElement);
+            if (currentWidget.formatType !== 'boolean') {
+                selectionRange = dom.getSelectionRange(focusedElement);
+            }
         }
 
         var oldData = this.state.data;
@@ -179,7 +187,9 @@ ListRenderer.include({
                     currentRowID = self.state.data[newRowIndex].id;
                     currentWidget = self.allFieldWidgets[currentRowID][self.currentFieldIndex];
                     focusedElement = currentWidget.getFocusableElement().get(0);
-                    dom.setSelectionRange(focusedElement, selectionRange);
+                    if (selectionRange) {
+                        dom.setSelectionRange(focusedElement, selectionRange);
+                    }
                 });
             }
         });
@@ -290,12 +300,7 @@ ListRenderer.include({
             renderInvisible: editMode,
             renderWidgets: editMode,
         };
-        if (!editMode) {
-            // Force 'readonly' mode for widgets in readonly rows as
-            // otherwise they default to the view mode which is 'edit' for
-            // an editable list view
-            options.mode = 'readonly';
-        }
+        options.mode = editMode ? 'edit' : 'readonly';
 
         // Switch each cell to the new mode; note: the '_renderBodyCell'
         // function might fill the 'this.defs' variables with multiple deferred
@@ -412,7 +417,7 @@ ListRenderer.include({
      * @returns {boolean}
      */
     _isEditable: function () {
-        return this.mode === 'edit' && !this.state.groupedBy.length && this.arch.attrs.editable;
+        return !this.state.groupedBy.length && this.editable;
     },
     /**
      * Move the cursor on the end of the previous line, if possible.
@@ -493,7 +498,8 @@ ListRenderer.include({
     _renderRow: function (record, index) {
         var $row = this._super.apply(this, arguments);
         if (this.addTrashIcon) {
-            var $icon = $('<span>', {class: 'fa fa-trash-o', name: 'delete'});
+            var $icon = $('<button>', {class: 'fa fa-trash-o o_list_record_delete_btn', name: 'delete',
+                'aria-label': _t('Delete row ') + (index+1)});
             var $td = $('<td>', {class: 'o_list_record_delete'}).append($icon);
             $row.append($td);
         }
@@ -525,8 +531,13 @@ ListRenderer.include({
      * @returns {Deferred} this deferred is resolved immediately
      */
     _renderView: function () {
+        var self = this;
         this.currentRow = null;
-        return this._super.apply(this, arguments);
+        return this._super.apply(this, arguments).then(function () {
+            if (self._isEditable()) {
+                self.$('table').addClass('o_editable_list');
+            }
+        });
     },
     /**
      * Force the resequencing of the items in the list.
@@ -538,16 +549,53 @@ ListRenderer.include({
     _resequence: function (event, ui) {
         var self = this;
         var movedRecordID = ui.item.data('id');
-        var rowIDs = _.pluck(this.state.data, 'id');
-        rowIDs = _.without(rowIDs, movedRecordID);
-        rowIDs.splice(ui.item.index(), 0, movedRecordID);
-        var sequences = _.map(this.state.data, function(record) {
-            return record.data[self.handleField];
+        var rows = this.state.data;
+        var row = _.findWhere(rows, {id: movedRecordID});
+        var index0 = rows.indexOf(row);
+        var index1 = ui.item.index();
+        var lower = Math.min(index0, index1);
+        var upper = Math.max(index0, index1) + 1;
+
+        var order = _.findWhere(self.state.orderedBy, {name: self.handleField});
+        var asc = !order || order.asc;
+        var reorderAll = false;
+        var sequence = (asc ? -1 : 1) * Infinity;
+
+        // determine if we need to reorder all lines
+        _.each(rows, function (row, index) {
+            if ((index < lower || index >= upper) &&
+                ((asc && sequence >= row.data[self.handleField]) ||
+                 (!asc && sequence <= row.data[self.handleField]))) {
+                reorderAll = true;
+            }
+            sequence = row.data[self.handleField];
         });
-        this.trigger_up('resequence', {
-            rowIDs: rowIDs,
-            offset: _.min(sequences),
-            handleField: this.handleField,
+
+        if (reorderAll) {
+            rows = _.without(rows, row);
+            rows.splice(index1, 0, row);
+        } else {
+            rows = rows.slice(lower, upper);
+            rows = _.without(rows, row);
+            if (index0 > index1) {
+                rows.unshift(row);
+            } else {
+                rows.push(row);
+            }
+        }
+
+        var sequences = _.pluck(_.pluck(rows, 'data'), self.handleField);
+        var rowIDs = _.pluck(rows, 'id');
+
+        if (!asc) {
+            rowIDs.reverse();
+        }
+        this.unselectRow().then(function () {
+            self.trigger_up('resequence', {
+                rowIDs: rowIDs,
+                offset: _.min(sequences),
+                handleField: self.handleField,
+            });
         });
     },
     /**
@@ -585,12 +633,18 @@ ListRenderer.include({
             if (fieldIndex >= (self.allFieldWidgets[record.id] || []).length) {
                 return $.Deferred().reject();
             }
+            // _activateFieldWidget might trigger an onchange,
+            // which requires currentFieldIndex to be set
+            // so that the cursor can be restored
+            var oldFieldIndex = self.currentFieldIndex;
+            self.currentFieldIndex = fieldIndex;
             fieldIndex = self._activateFieldWidget(record, fieldIndex, {
                 inc: 1,
                 wrap: wrap,
                 event: options && options.event,
             });
             if (fieldIndex < 0) {
+                self.currentFieldIndex = oldFieldIndex;
                 return $.Deferred().reject();
             }
             self.currentFieldIndex = fieldIndex;
@@ -787,8 +841,16 @@ ListRenderer.include({
      */
     _onTrashIconClick: function (event) {
         event.stopPropagation();
-        var id = $(event.target).closest('tr').data('id');
-        this.trigger_up('list_record_delete', {id: id});
+        var $row = $(event.target).closest('tr')
+        var id = $row.data('id');
+        if ($row.hasClass('o_selected_row')) {
+            this.trigger_up('list_record_delete', {id: id});
+        } else {
+            var self = this;
+            this.unselectRow().then(function () {
+                self.trigger_up('list_record_delete', {id: id});
+            });
+        }
     },
     /**
      * When a click happens outside the list view, or outside a currently

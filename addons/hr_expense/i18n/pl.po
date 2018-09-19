@@ -4,7 +4,7 @@
 # 
 # Translators:
 # Judyta Kaźmierczak <judyta.kazmierczak@openglobe.pl>, 2017
-# Martin Trigaux <mat@odoo.com>, 2017
+# Martin Trigaux, 2017
 # Piotr Szlązak <szlazakpiotr@gmail.com>, 2017
 # Grzegorz Grzelak <grzegorz.grzelak@openglobe.pl>, 2017
 # Zdzisław Krajewski <zdzichucb@gmail.com>, 2017
@@ -12,13 +12,16 @@
 # Marcin Młynarczyk <mlynarczyk@gmail.com>, 2017
 # Paweł Michoń <michon.pawel@wp.pl>, 2017
 # Karol Rybak <karolrybak85@gmail.com>, 2017
+# Tomasz Leppich <t.leppich@gmail.com>, 2018
+# Radosław Biegalski <radoslaw.biegalski@openglobe.pl>, 2018
+# Piotr Cierkosz <piotr.w.cierkosz@gmail.com>, 2018
 msgid ""
 msgstr ""
-"Project-Id-Version: Odoo Server 10.saas~18\n"
+"Project-Id-Version: Odoo Server 11.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2017-10-02 11:26+0000\n"
-"PO-Revision-Date: 2017-10-02 11:26+0000\n"
-"Last-Translator: Karol Rybak <karolrybak85@gmail.com>, 2017\n"
+"POT-Creation-Date: 2018-02-19 13:43+0000\n"
+"PO-Revision-Date: 2018-02-19 13:43+0000\n"
+"Last-Translator: Piotr Cierkosz <piotr.w.cierkosz@gmail.com>, 2018\n"
 "Language-Team: Polish (https://www.transifex.com/odoo/teams/41243/pl/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -76,7 +79,7 @@ msgstr ""
 #. openerp-web
 #: code:addons/hr_expense/static/src/js/tour.js:21
 #, python-format
-msgid "<p>Click here to create your first expense and add it to below.</p>"
+msgid "<p>Click here to create your first expense and add it under here.</p>"
 msgstr ""
 
 #. module: hr_expense
@@ -400,7 +403,7 @@ msgid "Click here to create new expenses."
 msgstr "Kliknij tutaj, aby stworzyć nowe wydatki."
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:342
+#: code:addons/hr_expense/models/hr_expense.py:343
 #, python-format
 msgid "Click to add a new expense,"
 msgstr ""
@@ -429,11 +432,6 @@ msgstr "Firma związana z tym dziennikiem"
 #: model:ir.ui.menu,name:hr_expense.menu_hr_expense_configuration
 msgid "Configuration"
 msgstr "Konfiguracja"
-
-#. module: hr_expense
-#: model:ir.actions.act_window,name:hr_expense.action_hr_expense_configuration
-msgid "Configure Expense"
-msgstr ""
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_planner
@@ -628,7 +626,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.model,name:hr_expense.model_hr_expense_sheet_register_payment_wizard
 msgid "Expense Report Register Payment wizard"
-msgstr ""
+msgstr "Kreator raportów o wydatkach i zarejestrowanych płatnosciach."
 
 #. module: hr_expense
 #: model:ir.model.fields,help:hr_expense.field_hr_expense_sheet_state
@@ -729,6 +727,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.ui.menu,name:hr_expense.menu_hr_expense_root
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_form_view
+#: model:ir.ui.view,arch_db:hr_expense.res_config_settings_view_form
 #: model:ir.ui.view,arch_db:hr_expense.view_expenses_tree
 #: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_filter
 #: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_sheet_filter
@@ -787,13 +786,13 @@ msgid "Expenses follow this flow:"
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:437
+#: code:addons/hr_expense/models/hr_expense.py:438
 #, python-format
 msgid "Expenses must belong to the same Employee."
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:565
+#: code:addons/hr_expense/models/hr_expense.py:566
 #, python-format
 msgid ""
 "Expenses must have an expense journal specified to generate accounting "
@@ -801,7 +800,7 @@ msgid ""
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:441
+#: code:addons/hr_expense/models/hr_expense.py:442
 #, python-format
 msgid "Expenses must have been paid by the same entity (Company or employee)"
 msgstr ""
@@ -905,7 +904,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_register_payment_wizard_hide_payment_method
 msgid "Hide Payment Method"
-msgstr ""
+msgstr "Ukryj metodę płatności"
 
 #. module: hr_expense
 #: model:product.product,name:hr_expense.hotel_rent
@@ -926,7 +925,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_id
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_refuse_wizard_id
-#: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_id_7678
+#: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_id_7700
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_register_payment_wizard_id
 msgid "ID"
 msgstr "ID"
@@ -1062,7 +1061,7 @@ msgid "New Mail"
 msgstr "Nowa wiadomość email"
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:265
+#: code:addons/hr_expense/models/hr_expense.py:266
 #, python-format
 msgid ""
 "No Expense account found for the product %s (or for its category), please "
@@ -1070,13 +1069,13 @@ msgid ""
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:230
+#: code:addons/hr_expense/models/hr_expense.py:231
 #, python-format
 msgid "No Home Address found for the employee %s, please configure one."
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:209
+#: code:addons/hr_expense/models/hr_expense.py:210
 #, python-format
 msgid "No credit account found for the %s journal, please configure one."
 msgstr ""
@@ -1112,7 +1111,7 @@ msgstr "Urzędnik"
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_planner
 msgid "Once a month"
-msgstr ""
+msgstr "Raz w miesiącu"
 
 #. module: hr_expense
 #: model:ir.actions.act_window,help:hr_expense.hr_expense_actions_my_unsubmitted
@@ -1153,6 +1152,18 @@ msgid ""
 msgstr ""
 
 #. module: hr_expense
+#: code:addons/hr_expense/models/hr_expense.py:543
+#, python-format
+msgid "Only HR Officers can approve expenses"
+msgstr ""
+
+#. module: hr_expense
+#: code:addons/hr_expense/models/hr_expense.py:534
+#, python-format
+msgid "Only HR Officers can refuse expenses"
+msgstr ""
+
+#. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_planner
 msgid ""
 "Optionally, <strong>expenses are invoiced to the customer "
@@ -1184,7 +1195,7 @@ msgstr "Kwota płatności"
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_payment_mode
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_payment_mode
 msgid "Payment By"
-msgstr ""
+msgstr "Płatność od "
 
 #. module: hr_expense
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_register_payment_wizard_payment_date
@@ -1213,7 +1224,7 @@ msgid "Planner"
 msgstr "Planista"
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:270
+#: code:addons/hr_expense/models/hr_expense.py:271
 #, python-format
 msgid ""
 "Please configure Default Expense account for Product expense: "
@@ -1285,7 +1296,7 @@ msgstr "Przyczyna"
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_template_refuse_reason
 msgid "Reason :"
-msgstr ""
+msgstr "Powód:"
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_refuse_wizard_view_form
@@ -1450,6 +1461,7 @@ msgid "Set invoicing method on expense products"
 msgstr ""
 
 #. module: hr_expense
+#: model:ir.actions.act_window,name:hr_expense.action_hr_expense_configuration
 #: model:ir.ui.menu,name:hr_expense.menu_hr_expense_global_settings
 msgid "Settings"
 msgstr "Ustawienia"
@@ -1604,7 +1616,7 @@ msgstr "Do wysłania"
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_planner
 msgid "To do:"
-msgstr ""
+msgstr "Do zrobienia:"
 
 #. module: hr_expense
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_total_amount
@@ -1614,7 +1626,6 @@ msgstr "Suma"
 #. module: hr_expense
 #: model:ir.model.fields,field_description:hr_expense.field_hr_expense_sheet_total_amount
 #: model:ir.ui.view,arch_db:hr_expense.view_expenses_tree
-#: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_sheet_form
 #: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_sheet_tree
 msgid "Total Amount"
 msgstr "Łączna kwota"
@@ -1662,12 +1673,12 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_sheet_form
 msgid "View Attachments"
-msgstr ""
+msgstr "Zobacz załączniki"
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_form_view
 msgid "View Report"
-msgstr ""
+msgstr "Zobacz raport"
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_planner
@@ -1697,7 +1708,7 @@ msgid "Write the name of the product, or select an existing one."
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:562
+#: code:addons/hr_expense/models/hr_expense.py:563
 #, python-format
 msgid "You can only generate accounting entry for approved expense(s)."
 msgstr ""
@@ -1713,19 +1724,19 @@ msgid ""
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:592
+#: code:addons/hr_expense/models/hr_expense.py:598
 #, python-format
 msgid "You cannot add expense lines of another employee."
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:314
+#: code:addons/hr_expense/models/hr_expense.py:315
 #, python-format
 msgid "You cannot delete a posted expense."
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:468
+#: code:addons/hr_expense/models/hr_expense.py:469
 #, python-format
 msgid "You cannot delete a posted or paid expense."
 msgstr ""
@@ -1734,6 +1745,12 @@ msgstr ""
 #: code:addons/hr_expense/models/hr_expense.py:111
 #, python-format
 msgid "You cannot report expenses for different employees in the same report!"
+msgstr ""
+
+#. module: hr_expense
+#: code:addons/hr_expense/models/hr_expense.py:602
+#, python-format
+msgid "You cannot report expenses with different payment modes."
 msgstr ""
 
 #. module: hr_expense
@@ -1785,7 +1802,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.product_product_expense_form_view
 msgid "e.g. Lunch"
-msgstr ""
+msgstr "np. Lunch"
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_form_view
@@ -1795,7 +1812,7 @@ msgstr ""
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.view_hr_expense_sheet_form
 msgid "e.g. Trip to NY"
-msgstr ""
+msgstr "np. Wyjazd do NY"
 
 #. module: hr_expense
 #: model:ir.ui.view,arch_db:hr_expense.hr_expense_template_refuse_reason
@@ -1803,7 +1820,7 @@ msgid "has been refused"
 msgstr ""
 
 #. module: hr_expense
-#: code:addons/hr_expense/models/hr_expense.py:343
+#: code:addons/hr_expense/models/hr_expense.py:344
 #, python-format
 msgid "or send receipts by email to %s."
 msgstr ""

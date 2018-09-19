@@ -97,6 +97,13 @@ class Inventory(models.Model):
         else:
             self.total_qty = 0
 
+    @api.multi
+    def unlink(self):
+        for inventory in self:
+            if inventory.state == 'done':
+                raise UserError(_('You cannot delete a validated inventory adjustement.'))
+        return super(Inventory, self).unlink()
+
     @api.model
     def _selection_filter(self):
         """ Get the list of filter allowed according to the options checked
@@ -184,7 +191,7 @@ class Inventory(models.Model):
         })
 
     def action_start(self):
-        for inventory in self:
+        for inventory in self.filtered(lambda x: x.state not in ('done','cancel')):
             vals = {'state': 'confirm', 'date': fields.Datetime.now()}
             if (inventory.filter != 'partial') and not inventory.line_ids:
                 vals.update({'line_ids': [(0, 0, line_values) for line_values in inventory._get_inventory_lines_values()]})
@@ -301,7 +308,7 @@ class InventoryLine(models.Model):
         domain=[('type', '=', 'product')],
         index=True, required=True)
     product_name = fields.Char(
-        'Product Name', related='product_id.name', store=True)
+        'Product Name', related='product_id.name', store=True, readonly=True)
     product_code = fields.Char(
         'Product Code', related='product_id.default_code', store=True)
     product_uom_id = fields.Many2one(
@@ -325,7 +332,7 @@ class InventoryLine(models.Model):
     # TDE FIXME: necessary ? -> replace by location_id
     prodlot_name = fields.Char(
         'Serial Number Name',
-        related='prod_lot_id.name', store=True)
+        related='prod_lot_id.name', store=True, readonly=True)
     company_id = fields.Many2one(
         'res.company', 'Company', related='inventory_id.company_id',
         index=True, readonly=True, store=True)
@@ -364,8 +371,15 @@ class InventoryLine(models.Model):
             self._compute_theoretical_qty()
             self.product_qty = self.theoretical_qty
 
+    @api.multi
+    def write(self, values):
+        values.pop('product_name', False)
+        res = super(InventoryLine, self).write(values)
+        return res
+
     @api.model
     def create(self, values):
+        values.pop('product_name', False)
         if 'product_id' in values and 'product_uom_id' not in values:
             values['product_uom_id'] = self.env['product.product'].browse(values['product_id']).uom_id.id
         existings = self.search([
@@ -377,9 +391,10 @@ class InventoryLine(models.Model):
             ('prod_lot_id', '=', values.get('prod_lot_id'))])
         res = super(InventoryLine, self).create(values)
         if existings:
-            raise UserError(_("You cannot have two inventory adjustements in state 'in Progess' with the same product"
-                              "(%s), same location(%s), same package, same owner and same lot. Please first validate"
-                              "the first inventory adjustement with this product before creating another one.") % (res.product_id.name, res.location_id.name))
+            raise UserError(_("You cannot have two inventory adjustements in state 'in Progress' with the same product "
+                              "(%s), same location (%s), same package, same owner and same lot. Please first validate "
+                              "the first inventory adjustement with this product before creating another one.") %
+                            (res.product_id.display_name, res.location_id.display_name))
         return res
 
     @api.constrains('product_id')

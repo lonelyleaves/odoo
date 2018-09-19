@@ -4,7 +4,7 @@
 import re
 
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tools import email_split, float_is_zero
 
 from odoo.addons import decimal_precision as dp
@@ -109,17 +109,16 @@ class HrExpense(models.Model):
             raise UserError(_("You cannot report twice the same line!"))
         if len(self.mapped('employee_id')) != 1:
             raise UserError(_("You cannot report expenses for different employees in the same report!"))
-        expense_sheet = self.env['hr.expense.sheet'].create({
-            'expense_line_ids': [(4, line.id) for line in self],
-            'name': self[0].name if len(self.ids) == 1 else '',
-            'employee_id': self[0].employee_id.id,
-        })
         return {
             'type': 'ir.actions.act_window',
             'view_mode': 'form',
             'res_model': 'hr.expense.sheet',
             'target': 'current',
-            'res_id': expense_sheet.id,
+            'context': {
+                'default_expense_line_ids': [line.id for line in self],
+                'default_employee_id': self[0].employee_id.id,
+                'default_name': self[0].name if len(self.ids) == 1 else ''
+            }
         }
 
     def _prepare_move_line(self, line):
@@ -292,7 +291,7 @@ class HrExpense(models.Model):
             account_move.append(move_line)
 
             # Calculate tax lines and adjust base line
-            taxes = expense.tax_ids.compute_all(expense.unit_amount, expense.currency_id, expense.quantity, expense.product_id)
+            taxes = expense.tax_ids.with_context(round=True).compute_all(expense.unit_amount, expense.currency_id, expense.quantity, expense.product_id)
             account_move[-1]['price'] = taxes['total_excluded']
             account_move[-1]['tax_ids'] = [(6, 0, expense.tax_ids.ids)]
             for tax in taxes['taxes']:
@@ -332,14 +331,14 @@ class HrExpense(models.Model):
 
     @api.model
     def get_empty_list_help(self, help_message):
-        if help_message:
+        if help_message and help_message.find("oe_view_nocontent_create") == -1:
             use_mailgateway = self.env['ir.config_parameter'].sudo().get_param('hr_expense.use_mailgateway')
             alias_record = use_mailgateway and self.env.ref('hr_expense.mail_alias_expense') or False
             if alias_record and alias_record.alias_domain and alias_record.alias_name:
                 link = "<a id='o_mail_test' href='mailto:%(email)s?subject=Lunch%%20with%%20customer%%3A%%20%%2412.32'>%(email)s</a>" % {
                     'email': '%s@%s' % (alias_record.alias_name, alias_record.alias_domain)
                 }
-                return '<p class="oe_view_nocontent_create">%s<br/>%s</p>%s' % (
+                return '<p class="oe_view_nocontent_create oe_view_nocontent_alias">%s<br/>%s</p>%s' % (
                     _('Click to add a new expense,'),
                     _('or send receipts by email to %s.') % (link,),
                     help_message)
@@ -371,7 +370,9 @@ class HrExpense(models.Model):
             product = default_product
         else:
             expense_description = expense_description.replace(product_code.group(), '')
-            product = self.env['product.product'].search([('default_code', 'ilike', product_code.group(1))]) or default_product
+            products = self.env['product.product'].search([('default_code', 'ilike', product_code.group(1))]) or default_product
+            product = products.filtered(lambda p: p.default_code == product_code.group(1)) or products[0]
+        account = product.product_tmpl_id._get_product_accounts()['expense']
 
         pattern = '[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?'
         # Match the last occurence of a float in the string
@@ -398,6 +399,8 @@ class HrExpense(models.Model):
             'unit_amount': price,
             'company_id': employee.company_id.id,
         })
+        if account:
+            custom_values['account_id'] = account.id
         return super(HrExpense, self).message_new(msg_dict, custom_values)
 
 class HrExpenseSheet(models.Model):
@@ -434,24 +437,20 @@ class HrExpenseSheet(models.Model):
 
     @api.multi
     def check_consistency(self):
-        if any(sheet.employee_id != self[0].employee_id for sheet in self):
-            raise UserError(_("Expenses must belong to the same Employee."))
-
-        expense_lines = self.mapped('expense_line_ids')
-        if expense_lines and any(expense.payment_mode != expense_lines[0].payment_mode for expense in expense_lines):
-            raise UserError(_("Expenses must have been paid by the same entity (Company or employee)"))
+        for rec in self:
+            expense_lines = rec.expense_line_ids
+            if not expense_lines:
+                continue
+            if any(expense.employee_id != rec.employee_id for expense in expense_lines):
+                raise UserError(_("Expenses must belong to the same Employee."))
+            if any(expense.payment_mode != expense_lines[0].payment_mode for expense in expense_lines):
+                raise UserError(_("Expenses must have been paid by the same entity (Company or employee)"))
 
     @api.model
     def create(self, vals):
-        # Add the followers at creation, so they can be notified
-        if vals.get('employee_id'):
-            employee = self.env['hr.employee'].browse(vals['employee_id'])
-            users = self._get_users_to_subscribe(employee=employee) - self.env.user
-            vals['message_follower_ids'] = []
-            for partner in users.mapped('partner_id'):
-                vals['message_follower_ids'] += self.env['mail.followers']._add_follower_command(self._name, [], {partner.id: None}, {})[0]
+        self._create_set_followers(vals)
         sheet = super(HrExpenseSheet, self).create(vals)
-        self.check_consistency()
+        sheet.check_consistency()
         return sheet
 
     @api.multi
@@ -501,9 +500,23 @@ class HrExpenseSheet(models.Model):
         users = self._get_users_to_subscribe()
         self.message_subscribe_users(user_ids=users.ids)
 
+    @api.model
+    def _create_set_followers(self, values):
+        # Add the followers at creation, so they can be notified
+        employee_id = values.get('employee_id')
+        if not employee_id:
+            return
+
+        employee = self.env['hr.employee'].browse(employee_id)
+        users = self._get_users_to_subscribe(employee=employee) - self.env.user
+        values['message_follower_ids'] = []
+        MailFollowers = self.env['mail.followers']
+        for partner in users.mapped('partner_id'):
+            values['message_follower_ids'] += MailFollowers._add_follower_command(self._name, [], {partner.id: None}, {})[0]
+
     @api.onchange('employee_id')
     def _onchange_employee_id(self):
-        self.address_id = self.employee_id.address_home_id
+        self.address_id = self.employee_id.sudo().address_home_id
         self.department_id = self.employee_id.department_id
 
     @api.one
@@ -517,28 +530,14 @@ class HrExpenseSheet(models.Model):
             ).compute(expense.total_amount, self.currency_id)
         self.total_amount = total_amount
 
-    # FIXME: A 4 command is missing to explicitly declare the one2many relation
-    # between the sheet and the lines when using 'default_expense_line_ids':[ids]
-    # in the context. A fix from chm-odoo should come since
-    # several saas versions but sadly I had to add this hack to avoid this
-    # issue
-    @api.model
-    def _add_missing_default_values(self, values):
-        values = super(HrExpenseSheet, self)._add_missing_default_values(values)
-        if self.env.context.get('default_expense_line_ids', False):
-            lines_to_add = []
-            for line in values.get('expense_line_ids', []):
-                if line[0] == 1:
-                    lines_to_add.append([4, line[1], False])
-            values['expense_line_ids'] = lines_to_add + values['expense_line_ids']
-        return values
-
     @api.one
     def _compute_attachment_number(self):
         self.attachment_number = sum(self.expense_line_ids.mapped('attachment_number'))
 
     @api.multi
     def refuse_sheet(self, reason):
+        if not self.user_has_groups('hr_expense.group_hr_expense_user'):
+            raise UserError(_("Only HR Officers can refuse expenses"))
         self.write({'state': 'cancel'})
         for sheet in self:
             sheet.message_post_with_view('hr_expense.hr_expense_template_refuse_reason',
@@ -546,6 +545,8 @@ class HrExpenseSheet(models.Model):
 
     @api.multi
     def approve_expense_sheets(self):
+        if not self.user_has_groups('hr_expense.group_hr_expense_user'):
+            raise UserError(_("Only HR Officers can approve expenses"))
         self.write({'state': 'approve', 'responsible_id': self.env.user.id})
 
     @api.multi
@@ -591,8 +592,15 @@ class HrExpenseSheet(models.Model):
         return res
 
     @api.one
-    @api.constrains('expense_line_ids')
+    @api.constrains('expense_line_ids', 'employee_id')
     def _check_employee(self):
         employee_ids = self.expense_line_ids.mapped('employee_id')
         if len(employee_ids) > 1 or (len(employee_ids) == 1 and employee_ids != self.employee_id):
             raise ValidationError(_('You cannot add expense lines of another employee.'))
+
+    @api.one
+    @api.constrains('expense_line_ids')
+    def _check_payment_mode(self):
+        payment_mode = set(self.expense_line_ids.mapped('payment_mode'))
+        if len(payment_mode) > 1:
+            raise ValidationError(_('You cannot report expenses with different payment modes.'))

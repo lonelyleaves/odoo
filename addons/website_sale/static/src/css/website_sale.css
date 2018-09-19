@@ -323,6 +323,9 @@
     top: 0;
     bottom: 65px;
   }
+  #products_grid .oe_product .oe_subdescription {
+    max-height: 40px;
+  }
 
   #products_grid .oe_product.oe_image_full .oe_product_image {
     bottom: 50px;
@@ -339,6 +342,10 @@
 
 .oe_cart table td:first-child {
   min-width: 76px;
+}
+
+.oe_cart > .oe_structure {
+  clear: both;
 }
 
 div#payment_method div.list-group {
@@ -549,11 +556,6 @@ ul.wizard li:last-child {
 }
 ul.wizard li:last-child .chevron {
   display: none;
-}
-
-/* Shipping & Billing */
-.label-optional {
-  font-weight: normal;
 }
 
 /* Collapse category */

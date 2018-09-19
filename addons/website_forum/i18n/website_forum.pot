@@ -4,10 +4,10 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Odoo Server 10.saas~18\n"
+"Project-Id-Version: Odoo Server 11.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2017-09-20 09:54+0000\n"
-"PO-Revision-Date: 2017-09-20 09:54+0000\n"
+"POT-Creation-Date: 2018-07-27 11:56+0000\n"
+"PO-Revision-Date: 2018-07-27 11:56+0000\n"
 "Last-Translator: <>\n"
 "Language-Team: \n"
 "MIME-Version: 1.0\n"
@@ -391,7 +391,7 @@ msgid "After posting the user will be proposed to share its question or answer o
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/controllers/main.py:187
+#: code:addons/website_forum/controllers/main.py:196
 #: model:ir.ui.view,arch_db:website_forum.forum_index
 #, python-format
 msgid "All"
@@ -408,7 +408,7 @@ msgid "Answer"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:501
+#: code:addons/website_forum/models/forum.py:511
 #: model:mail.message.subtype,description:website_forum.mt_answer_edit
 #: model:mail.message.subtype,name:website_forum.mt_answer_edit
 #, python-format
@@ -592,8 +592,9 @@ msgid "Back to"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/controllers/main.py:324
-#: code:addons/website_forum/controllers/main.py:395
+#: code:addons/website_forum/controllers/main.py:333
+#: code:addons/website_forum/controllers/main.py:335
+#: code:addons/website_forum/controllers/main.py:404
 #, python-format
 msgid "Bad Request"
 msgstr ""
@@ -1708,20 +1709,20 @@ msgid "Nofollow links"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:870
-#: code:addons/website_forum/models/forum.py:890
+#: code:addons/website_forum/models/forum.py:880
+#: code:addons/website_forum/models/forum.py:900
 #, python-format
 msgid "Not allowed to vote for its own post"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:934
+#: code:addons/website_forum/models/forum.py:944
 #, python-format
 msgid "Not enough karma to create a new Tag"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:491
+#: code:addons/website_forum/models/forum.py:501
 #, python-format
 msgid "Not enough karma to retag."
 msgstr ""
@@ -1913,7 +1914,7 @@ msgid "Posted 100 comments"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:435
+#: code:addons/website_forum/models/forum.py:438
 #, python-format
 msgid "Posting answer on a [Deleted] or [Closed] question is not possible"
 msgstr ""
@@ -1970,7 +1971,7 @@ msgid "Question"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:504
+#: code:addons/website_forum/models/forum.py:514
 #: model:mail.message.subtype,description:website_forum.mt_question_edit
 #: model:mail.message.subtype,name:website_forum.mt_question_edit
 #, python-format
@@ -2008,6 +2009,12 @@ msgid "Question set as favorite by 5 users"
 msgstr ""
 
 #. module: website_forum
+#: code:addons/website_forum/controllers/main.py:335
+#, python-format
+msgid "Question should not be empty."
+msgstr ""
+
+#. module: website_forum
 #: model:ir.ui.view,arch_db:website_forum.header
 msgid "Question tools"
 msgstr ""
@@ -2041,7 +2048,7 @@ msgid "Questions"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:522
+#: code:addons/website_forum/models/forum.py:532
 #, python-format
 msgid "Re: %s"
 msgstr ""
@@ -2227,21 +2234,21 @@ msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:100
+#: code:addons/website_forum/static/src/js/website_forum.js:101
 #, python-format
 msgid "Sorry you must be logged to flag a post"
 msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:149
+#: code:addons/website_forum/static/src/js/website_forum.js:150
 #, python-format
 msgid "Sorry you must be logged to vote"
 msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:199
+#: code:addons/website_forum/static/src/js/website_forum.js:200
 #, python-format
 msgid "Sorry, anonymous users cannot choose correct answer."
 msgstr ""
@@ -2253,7 +2260,7 @@ msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:144
+#: code:addons/website_forum/static/src/js/website_forum.js:145
 #, python-format
 msgid "Sorry, you cannot vote for your own posts"
 msgstr ""
@@ -2394,7 +2401,9 @@ msgid "This community is for professional and enthusiast users,\n"
 msgstr ""
 
 #. module: website_forum
+#: code:addons/website_forum/models/forum.py:51
 #: model:forum.forum,description:website_forum.forum_help
+#, python-format
 msgid "This community is for professionals and enthusiasts of our products and services. Share and discuss the best content and new marketing ideas, build your professional profile and become a better marketer together."
 msgstr ""
 
@@ -2404,21 +2413,21 @@ msgid "This formula is used in order to sort by relevance. The variable 'votes' 
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:411
+#: code:addons/website_forum/models/forum.py:409
 #, python-format
 msgid "This forum does not allow %s"
 msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:110
+#: code:addons/website_forum/static/src/js/website_forum.js:111
 #, python-format
 msgid "This post can not be flagged"
 msgstr ""
 
 #. module: website_forum
 #. openerp-web
-#: code:addons/website_forum/static/src/js/website_forum.js:105
+#: code:addons/website_forum/static/src/js/website_forum.js:106
 #, python-format
 msgid "This post is already flagged"
 msgstr ""
@@ -2450,8 +2459,8 @@ msgid "Title must not be empty"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/controllers/main.py:324
-#: code:addons/website_forum/controllers/main.py:395
+#: code:addons/website_forum/controllers/main.py:333
+#: code:addons/website_forum/controllers/main.py:404
 #, python-format
 msgid "Title should not be empty."
 msgstr ""
@@ -2679,9 +2688,15 @@ msgid "You already have one pending post.<br/>\n"
 msgstr ""
 
 #. module: website_forum
-#: code:addons/website_forum/models/forum.py:140
+#: code:addons/website_forum/models/forum.py:138
 #, python-format
 msgid "You cannot choose %s as default post since the forum does not allow it."
+msgstr ""
+
+#. module: website_forum
+#: code:addons/website_forum/models/forum.py:428
+#, python-format
+msgid "You cannot create recursive forum posts."
 msgstr ""
 
 #. module: website_forum

@@ -5,8 +5,10 @@ import werkzeug
 
 from odoo import exceptions, fields, http, _
 from odoo.http import request
-from odoo.addons.portal.controllers.portal import CustomerPortal, get_records_pager
+from odoo.addons.portal.controllers.portal import get_records_pager
+from odoo.addons.sale.controllers.portal import CustomerPortal
 from odoo.addons.portal.controllers.mail import _message_post_helper
+from odoo.osv import expression
 
 
 class CustomerPortal(CustomerPortal):
@@ -45,10 +47,10 @@ class sale_quote(http.Controller):
         else:
             Order = request.env['sale.order'].search([('id', '=', order_id)])
         # Log only once a day
-        if Order and request.session.get('view_quote') != now and request.env.user.share:
-            request.session['view_quote'] = now
+        if Order and request.session.get('view_quote_%s' % Order.id) != now and request.env.user.share:
+            request.session['view_quote_%s' % Order.id] = now
             body = _('Quotation viewed by customer')
-            _message_post_helper(res_model='sale.order', res_id=Order.id, message=body, token=token, message_type='notification', subtype="mail.mt_note", partner_ids=Order.user_id.sudo().partner_id.ids)
+            _message_post_helper(res_model='sale.order', res_id=Order.id, message=body, token=Order.access_token, message_type='notification', subtype="mail.mt_note", partner_ids=Order.user_id.sudo().partner_id.ids)
         if not Order:
             return request.render('website.404')
 
@@ -79,6 +81,7 @@ class sale_quote(http.Controller):
             'tx_id': Transaction.id if Transaction else False,
             'tx_state': Transaction.state if Transaction else False,
             'tx_post_msg': Transaction.acquirer_id.post_msg if Transaction else False,
+            'payment_tx': Transaction,
             'need_payment': order_sudo.invoice_status == 'to invoice' and Transaction.state in ['draft', 'cancel', 'error'],
             'token': token,
             'return_url': '/shop/payment/validate',
@@ -87,7 +90,11 @@ class sale_quote(http.Controller):
         }
 
         if order_sudo.require_payment or values['need_payment']:
-            acquirers = request.env['payment.acquirer'].sudo().search([('website_published', '=', True), ('company_id', '=', order_sudo.company_id.id)])
+            domain = expression.AND([
+                ['&', ('website_published', '=', True), ('company_id', '=', order_sudo.company_id.id)],
+                ['|', ('specific_countries', '=', False), ('country_ids', 'in', [order_sudo.partner_id.country_id.id])]
+            ])
+            acquirers = request.env['payment.acquirer'].sudo().search(domain)
 
             values['form_acquirers'] = [acq for acq in acquirers if acq.payment_flow == 'form' and acq.view_template_id]
             values['s2s_acquirers'] = [acq for acq in acquirers if acq.payment_flow == 's2s' and acq.registration_view_template_id]
@@ -168,7 +175,7 @@ class sale_quote(http.Controller):
 
     # note dbo: website_sale code
     @http.route(['/quote/<int:order_id>/transaction/'], type='json', auth="public", website=True)
-    def payment_transaction_token(self, acquirer_id, order_id, save_token=False,access_token=None):
+    def payment_transaction_token(self, acquirer_id, order_id, save_token=False,access_token=None, **kwargs):
         """ Json method that creates a payment.transaction, used to create a
         transaction when the user clicks on 'pay now' button. After having
         created the transaction, the event continues and the user is redirected
@@ -186,14 +193,10 @@ class sale_quote(http.Controller):
         token = request.env['payment.token'].sudo()  # currently no support of payment tokens
         tx = request.env['payment.transaction'].sudo().search([('reference', '=', order.name)], limit=1)
         tx_type = order._get_payment_type()
-        tx = tx._check_or_create_sale_tx(order, acquirer, payment_token=token, tx_type=tx_type, add_tx_values={
-            'callback_model_id': request.env['ir.model'].sudo().search([('model', '=', order._name)], limit=1).id,
-            'callback_res_id': order.id,
-            'callback_method': '_confirm_online_quote',
-        })
+        tx = tx._check_or_create_sale_tx(order, acquirer, payment_token=token, tx_type=tx_type)
         request.session['quote_%s_transaction_id' % order.id] = tx.id
 
-        return tx.render_sale_button(order, '/quote/%s/%s' % (order_id, token) if token else '/quote/%s' % order_id,
+        return tx.render_sale_button(order, '/quote/%s/%s' % (order_id, access_token) if access_token else '/quote/%s' % order_id,
                                      submit_txt=_('Pay & Confirm'), render_values={
                                          'type': order._get_payment_type(),
                                          'alias_usage': _('If we store your payment information on our server, subscription payments will be made automatically.'),
@@ -222,11 +225,7 @@ class sale_quote(http.Controller):
         # set the transaction type to server2server
         tx_type = 'server2server'
         # check if the transaction exists, if not then it create one
-        tx = tx._check_or_create_sale_tx(order, token.acquirer_id, payment_token=token, tx_type=tx_type, add_tx_values={
-            'callback_model_id': request.env['ir.model'].sudo().search([('model', '=', order._name)], limit=1).id,
-            'callback_res_id': order.id,
-            'callback_method': '_confirm_online_quote',
-        })
+        tx = tx._check_or_create_sale_tx(order, token.acquirer_id, payment_token=token, tx_type=tx_type)
         # set the transaction id into the session
         request.session['quote_%s_transaction_id' % order_id] = tx.id
         # proceed to the payment

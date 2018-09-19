@@ -37,7 +37,7 @@ except ImportError:
 FILE_TYPE_DICT = {
     'text/csv': ('csv', True, None),
     'application/vnd.ms-excel': ('xls', xlrd, 'xlrd'),
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('xlsx', xlsx, 'xlrd >= 0.8'),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('xlsx', xlsx, 'xlrd >= 1.0.0'),
     'application/vnd.oasis.opendocument.spreadsheet': ('ods', odf_ods_reader, 'odfpy')
 }
 EXTENSIONS = {
@@ -302,7 +302,8 @@ class Import(models.TransientModel):
         try:
             thousand_separator = decimal_separator = False
             for val in preview_values:
-                if val == '':
+                val = val.strip()
+                if not val:
                     continue
                 # value might have the currency symbol left or right from the value
                 val = self._remove_currency_symbol(val)
@@ -496,7 +497,6 @@ class Import(models.TransientModel):
                 'headers_type': header_types or False,
                 'preview': preview,
                 'options': options,
-                'advanced_mode': any([len(models.fix_import_export_id_paths(col)) > 1 for col in headers or []]),
                 'debug': self.user_has_groups('base.group_no_one'),
             }
         except Exception as error:
@@ -578,7 +578,7 @@ class Import(models.TransientModel):
             # Check that currency exists
             currency = self.env['res.currency'].search([('symbol', '=', split_value[currency_index].strip())])
             if len(currency):
-                return split_value[currency_index + 1 % 2] if not negative else '-' + split_value[currency_index + 1 % 2]
+                return split_value[(currency_index + 1) % 2] if not negative else '-' + split_value[(currency_index + 1) % 2]
             # Otherwise it is not a float with a currency symbol
             return False
 
@@ -587,6 +587,7 @@ class Import(models.TransientModel):
         thousand_separator = options.get('float_thousand_separator', ' ')
         decimal_separator = options.get('float_decimal_separator', '.')
         for line in data:
+            line[index] = line[index].strip()
             if not line[index]:
                 continue
             line[index] = line[index].replace(thousand_separator, '').replace(decimal_separator, '.')
@@ -597,9 +598,18 @@ class Import(models.TransientModel):
 
     @api.multi
     def _parse_import_data(self, data, import_fields, options):
+        """ Lauch first call to _parse_import_data_recursive with an
+        empty prefix. _parse_import_data_recursive will be run
+        recursively for each relational field.
+        """
+        return self._parse_import_data_recursive(self.res_model, '', data, import_fields, options)
+
+    @api.multi
+    def _parse_import_data_recursive(self, model, prefix, data, import_fields, options):
         # Get fields of type date/datetime
-        all_fields = self.env[self.res_model].fields_get()
+        all_fields = self.env[model].fields_get()
         for name, field in all_fields.items():
+            name = prefix + name
             if field['type'] in ('date', 'datetime') and name in import_fields:
                 # Parse date
                 index = import_fields.index(name)
@@ -612,13 +622,19 @@ class Import(models.TransientModel):
                     user_format = pycompat.to_native(options.get('%s_format' % field['type']))
                     for num, line in enumerate(data):
                         if line[index]:
+                            line[index] = line[index].strip()
+                        if line[index]:
                             try:
-                                line[index] = dt.strftime(dt.strptime(pycompat.to_native(line[index].strip()), user_format), server_format)
+                                line[index] = dt.strftime(dt.strptime(pycompat.to_native(line[index]), user_format), server_format)
                             except ValueError as e:
                                 raise ValueError(_("Column %s contains incorrect values. Error in line %d: %s") % (name, num + 1, e))
                             except Exception as e:
                                 raise ValueError(_("Error Parsing Date [%s:L%d]: %s") % (name, num + 1, e))
-
+            # Check if the field is in import_field and is a relational (followed by /)
+            # Also verify that the field name exactly match the import_field at the correct level.
+            elif any(name + '/' in import_field and name == import_field.split('/')[prefix.count('/')] for import_field in import_fields):
+                # Recursive call with the relational as new model and add the field name to the prefix
+                self._parse_import_data_recursive(field['relation'], name + '/', data, import_fields, options)
             elif field['type'] in ('float', 'monetary') and name in import_fields:
                 # Parse float, sometimes float values from file have currency symbol or () to denote a negative value
                 # We should be able to manage both case
