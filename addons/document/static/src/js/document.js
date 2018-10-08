@@ -5,6 +5,7 @@ var core = require('web.core');
 var Dialog = require('web.Dialog');
 var framework = require('web.framework');
 var Sidebar = require('web.Sidebar');
+var field_utils = require('web.field_utils');
 
 var _t = core._t;
 
@@ -14,12 +15,13 @@ Sidebar.include({
      */
     init : function (parent, options) {
         this._super.apply(this, arguments);
-        if (options.viewType === "form") {
+        this.hasAttachments = options.viewType === "form";
+        if (this.hasAttachments) {
             this.sections.splice(1, 0, { 'name' : 'files', 'label' : _t('Attachment(s)'), });
             this.items.files = [];
+            this.fileuploadId = _.uniqueId('oe_fileupload');
+            $(window).on(this.fileuploadId, this._onFileUploaded.bind(this));
         }
-        this.fileuploadId = _.uniqueId('oe_fileupload');
-        $(window).on(this.fileuploadId, this._onFileUploaded.bind(this));
     },
     /**
      * Get the attachment linked to the record when the toolbar started
@@ -28,13 +30,16 @@ Sidebar.include({
      */
     start: function () {
         var _super = this._super.bind(this);
-        this._updateAttachments().then(_super);
+        var def = this.hasAttachments ? this._updateAttachments() : $.when();
+        return def.then(_super);
     },
     /**
      * @override
      */
     destroy: function () {
-        $(window).off(this.fileuploadId);
+        if (this.hasAttachments) {
+            $(window).off(this.fileuploadId);
+        }
         this._super.apply(this, arguments);
     },
 
@@ -46,7 +51,9 @@ Sidebar.include({
      */
     updateEnv: function (env) {
         this.env = env;
-        this._updateAttachments().then(this._redraw.bind(this));
+        var _super = _.bind(this._super, this, env);
+        var def = this.hasAttachments ? this._updateAttachments() : $.when();
+        def.then(_super);
     },
 
     //--------------------------------------------------------------------------
@@ -61,6 +68,7 @@ Sidebar.include({
      */
     _processAttachments: function (attachments) {
         //to display number in name if more then one attachment which has same name.
+        var self = this;
         _.chain(attachments)
             .groupBy(function (attachment) { return attachment.name; })
             .each(function (attachment) {
@@ -75,6 +83,10 @@ Sidebar.include({
             if (a.type === "binary") {
                 a.url = '/web/content/'  + a.id + '?download=true';
             }
+            a.create_date = field_utils.parse.datetime(a.create_date, 'create_date', {isUTC: true});
+            a.create_date_string = field_utils.format.datetime(a.create_date, 'create_date', self.env.context.params);
+            a.write_date = field_utils.parse.datetime(a.write_date, 'write_date', {isUTC: true});
+            a.write_date_string = field_utils.format.datetime(a.write_date, 'write_date', self.env.context.params);
         });
         this.items.files = attachments;
     },
@@ -84,10 +96,12 @@ Sidebar.include({
      */
     _redraw: function () {
         this._super.apply(this, arguments);
-        this.$('.o_sidebar_add_attachment .o_form_binary_form')
-            .change(this._onAddAttachment.bind(this));
-        this.$('.o_sidebar_delete_attachment')
-            .click(this._onDeleteAttachment.bind(this));
+        if (this.hasAttachments) {
+            this.$('.o_sidebar_add_attachment .o_form_binary_form')
+                .change(this._onAddAttachment.bind(this));
+            this.$('.o_sidebar_delete_attachment')
+                .click(this._onDeleteAttachment.bind(this));
+        }
     },
     /**
      * Update the attachments to be displayed in the attachment section
@@ -96,6 +110,9 @@ Sidebar.include({
      * @private
      */
     _updateAttachments: function () {
+        if (this.items.files === undefined) {
+            return $.when();
+        }
         var activeId = this.env.activeIds[0];
         if (!activeId) {
             this.items.files = [];

@@ -62,6 +62,11 @@ class CommentDoc(pyjsdoc.CommentDoc):
         d['name'] = self.name
         return d
 
+    # don't resolve already resolved docs (e.g. a literal dict being
+    # include-ed in two different classes because I don't even care anymore
+    def become(self, modules):
+        return self
+
 class PropertyDoc(CommentDoc):
     @classmethod
     def from_param(cls, s, sourcemodule=None):
@@ -122,8 +127,14 @@ class FunctionDoc(CommentDoc):
     @property
     def params(self):
         tag_texts = self.get_as_list('param')
-        if self.get('guessed_params') is None:
-            return [ParamDoc(text) for text in tag_texts]
+        # turns out guessed_params is *almost* (?) always set to a list,
+        # if empty list of guessed params fall back to @params
+        if not self['guessed_params']:
+            # only get "primary" params (no "." in name)
+            return [
+                p for p in map(ParamDoc, tag_texts)
+                if '.' not in p.name
+            ]
         else:
             param_dict = {}
             for text in tag_texts:
@@ -174,7 +185,7 @@ class NSDoc(CommentDoc):
                     for p in self.get_as_list('property')
                 )
             ]
-        return self.members.items() or self['_members'] or []
+        return list(self.members.items()) or self['_members'] or []
 
     def has_property(self, name):
         return self.get_property(name) is not None
@@ -227,6 +238,12 @@ class ModuleDoc(NSDoc):
         vars['exports'] = self.exports
         return vars
 
+    def __str__(self):
+        s = super().__str__()
+        if self['sourcefile']:
+            s += " in file " + self['sourcefile']
+        return s
+
 class ClassDoc(NSDoc):
     namekey = 'class'
     @property
@@ -246,7 +263,8 @@ class ClassDoc(NSDoc):
         # FIXME: should ideally be a proxy namespace
         if method_name == 'prototype':
             return self
-        return super(ClassDoc, self).get_property(method_name)
+        return super(ClassDoc, self).get_property(method_name)\
+            or (self.superclass and self.superclass.get_property(method_name))
 
     @property
     def mixins(self):

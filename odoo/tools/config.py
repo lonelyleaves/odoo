@@ -6,6 +6,7 @@ try:
 except ImportError:
     import ConfigParser
 
+import errno
 import logging
 import optparse
 import os
@@ -14,6 +15,9 @@ import odoo
 from .. import release, conf, loglevels
 from . import appdirs, pycompat
 
+from passlib.context import CryptContext
+crypt_context = CryptContext(schemes=['pbkdf2_sha512', 'plaintext'],
+                             deprecated=['plaintext'])
 
 class MyOption (optparse.Option, object):
     """ optparse Option with two additional attributes.
@@ -113,7 +117,7 @@ class configmanager(object):
         group.add_option("--addons-path", dest="addons_path",
                          help="specify additional addons paths (separated by commas).",
                          action="callback", callback=self._check_addons_path, nargs=1, type="string")
-        group.add_option("--load", dest="server_wide_modules", help="Comma-separated list of server-wide modules.", my_default='web')
+        group.add_option("--load", dest="server_wide_modules", help="Comma-separated list of server-wide modules.", my_default='base,web')
 
         group.add_option("-D", "--data-dir", dest="data_dir", my_default=_get_default_datadir(),
                          help="Directory where to store Odoo data")
@@ -151,13 +155,13 @@ class configmanager(object):
         # Testing Group
         group = optparse.OptionGroup(parser, "Testing Configuration")
         group.add_option("--test-file", dest="test_file", my_default=False,
-                         help="Launch a python or YML test file.")
-        group.add_option("--test-report-directory", dest="test_report_directory", my_default=False,
-                         help="If set, will save sample of all reports in this directory.")
-        group.add_option("--test-enable", action="store_true", dest="test_enable",
-                         my_default=False, help="Enable YAML and unit tests.")
-        group.add_option("--test-commit", action="store_true", dest="test_commit",
-                         my_default=False, help="Commit database changes performed by YAML or XML tests.")
+                         help="Launch a python test file.")
+        group.add_option("--test-enable", action="callback", callback=self._test_enable_callback,
+                         dest='test_enable',
+                         help="Enable unit tests.")
+        group.add_option("--test-tags", dest="test_tags",
+                         help="Comma separated list of tags to filter which tests to excute. Enable unit tests if set.")
+
         parser.add_option_group(group)
 
         # Logging Group
@@ -216,14 +220,14 @@ class configmanager(object):
                          choices=['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'],
                          help="specify the database ssl connection mode (see PostgreSQL documentation)")
         group.add_option("--db_maxconn", dest="db_maxconn", type='int', my_default=64,
-                         help="specify the the maximum number of physical connections to posgresql")
-        group.add_option("--db-template", dest="db_template", my_default="template1",
+                         help="specify the the maximum number of physical connections to PostgreSQL")
+        group.add_option("--db-template", dest="db_template", my_default="template0",
                          help="specify a custom database template to create a new database")
         parser.add_option_group(group)
 
-        group = optparse.OptionGroup(parser, "Internationalisation options",
-            "Use these options to translate Odoo to another language."
-            "See i18n section of the user manual. Option '-d' is mandatory."
+        group = optparse.OptionGroup(parser, "Internationalisation options. ",
+            "Use these options to translate Odoo to another language. "
+            "See i18n section of the user manual. Option '-d' is mandatory. "
             "Option '-l' is mandatory in case of importation"
             )
         group.add_option('--load-language', dest="load_language",
@@ -242,7 +246,9 @@ class configmanager(object):
 
         security = optparse.OptionGroup(parser, 'Security-related options')
         security.add_option('--no-database-list', action="store_false", dest='list_db', my_default=True,
-                            help="disable the ability to return the list of databases")
+                            help="Disable the ability to obtain or view the list of databases. "
+                                 "Also disable access to the database manager and selector, "
+                                 "so be sure to set a proper --database parameter first")
         parser.add_option_group(security)
 
         # Advanced options
@@ -269,7 +275,7 @@ class configmanager(object):
                          type="int")
         group.add_option("--unaccent", dest="unaccent", my_default=False, action="store_true",
                          help="Use the unaccent function provided by the database when available.")
-        group.add_option("--geoip-db", dest="geoip_database", my_default='/usr/share/GeoIP/GeoLiteCity.dat',
+        group.add_option("--geoip-db", dest="geoip_database", my_default='/usr/share/GeoIP/GeoLite2-City.mmdb',
                          help="Absolute path to the GeoIP database file.")
         parser.add_option_group(group)
 
@@ -280,10 +286,12 @@ class configmanager(object):
                              help="Specify the number of workers, 0 disable prefork mode.",
                              type="int")
             group.add_option("--limit-memory-soft", dest="limit_memory_soft", my_default=2048 * 1024 * 1024,
-                             help="Maximum allowed virtual memory per worker, when reached the worker be reset after the current request (default 671088640 aka 640MB).",
+                             help="Maximum allowed virtual memory per worker, when reached the worker be "
+                             "reset after the current request (default 2048MiB).",
                              type="int")
             group.add_option("--limit-memory-hard", dest="limit_memory_hard", my_default=2560 * 1024 * 1024,
-                             help="Maximum allowed virtual memory per worker, when reached, any memory allocation will fail (default 805306368 aka 768MB).",
+                             help="Maximum allowed virtual memory per worker, when reached, any memory "
+                             "allocation will fail (default 2560MiB).",
                              type="int")
             group.add_option("--limit-time-cpu", dest="limit_time_cpu", my_default=60,
                              help="Maximum allowed CPU time per request (default 60).",
@@ -315,7 +323,7 @@ class configmanager(object):
         arguments.
 
         This method initializes odoo.tools.config and openerp.conf (the
-        former should be removed in the furture) with library-wide
+        former should be removed in the future) with library-wide
         configuration values.
 
         This method must be called before proper usage of this library can be
@@ -388,9 +396,9 @@ class configmanager(object):
             self.options['pidfile'] = False
         # and the server_wide_modules
         if self.options['server_wide_modules'] in ('', 'None', 'False'):
-            self.options['server_wide_modules'] = 'web'
+            self.options['server_wide_modules'] = 'base,web'
 
-        # if defined dont take the configfile value even if the defined value is None
+        # if defined do not take the configfile value even if the defined value is None
         keys = ['http_interface', 'http_port', 'longpolling_port', 'http_enable',
                 'db_name', 'db_user', 'db_password', 'db_host', 'db_sslmode',
                 'db_port', 'db_template', 'logfile', 'pidfile', 'smtp_port',
@@ -420,7 +428,7 @@ class configmanager(object):
             'dev_mode', 'shell_interface', 'smtp_ssl', 'load_language',
             'stop_after_init', 'logrotate', 'without_demo', 'http_enable', 'syslog',
             'list_db', 'proxy_mode',
-            'test_file', 'test_enable', 'test_commit', 'test_report_directory',
+            'test_file', 'test_tags',
             'osv_memory_count_limit', 'osv_memory_age_limit', 'max_cron_threads', 'unaccent',
             'data_dir',
             'server_wide_modules',
@@ -477,6 +485,8 @@ class configmanager(object):
             if len(self.options['language']) > 5:
                 raise Exception('ERROR: The Lang name must take max 5 chars, Eg: -lfr_BE')
 
+        self.options['test_enable'] = bool(self.options['test_tags'])
+
         if opt.save:
             self.save()
 
@@ -509,6 +519,10 @@ class configmanager(object):
             ad_paths.append(res)
 
         setattr(parser.values, option.dest, ",".join(ad_paths))
+
+    def _test_enable_callback(self, option, opt, value, parser):
+        if not parser.values.test_tags:
+            parser.values.test_tags = "+standard"
 
     def load(self):
         outdated_options_map = {
@@ -615,14 +629,31 @@ class configmanager(object):
     @property
     def session_dir(self):
         d = os.path.join(self['data_dir'], 'sessions')
-        if not os.path.exists(d):
+        try:
             os.makedirs(d, 0o700)
-        else:
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
             assert os.access(d, os.W_OK), \
                 "%s: directory is not writable" % d
         return d
 
     def filestore(self, dbname):
         return os.path.join(self['data_dir'], 'filestore', dbname)
+
+    def set_admin_password(self, new_password):
+        self.options['admin_passwd'] = crypt_context.encrypt(new_password)
+
+    def verify_admin_password(self, password):
+        """Verifies the super-admin password, possibly updating the stored hash if needed"""
+        stored_hash = self.options['admin_passwd']
+        if not stored_hash:
+            # empty password/hash => authentication forbidden
+            return False
+        result, updated_hash = crypt_context.verify_and_update(password, stored_hash)
+        if result:
+            if updated_hash:
+                self.options['admin_passwd'] = updated_hash
+            return True
 
 config = configmanager()

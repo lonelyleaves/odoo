@@ -1,108 +1,120 @@
 # Translation of Odoo Server.
 # This file contains the translation of the following modules:
-# * crm_project_issue
-#
+# * crm_project
+# 
 # Translators:
+# Martin Trigaux, 2018
 msgid ""
 msgstr ""
-"Project-Id-Version: Odoo 9.0\n"
+"Project-Id-Version: Odoo Server saas~11.5\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2016-08-18 14:06+0000\n"
-"PO-Revision-Date: 2016-04-30 18:51+0000\n"
-"Last-Translator: Martin Trigaux\n"
-"Language-Team: Norwegian Bokmål (http://www.transifex.com/odoo/odoo-9/"
-"language/nb/)\n"
-"Language: nb\n"
+"POT-Creation-Date: 2018-09-21 13:17+0000\n"
+"PO-Revision-Date: 2018-09-21 13:17+0000\n"
+"Last-Translator: Martin Trigaux, 2018\n"
+"Language-Team: Norwegian Bokmål (https://www.transifex.com/odoo/teams/41243/nb/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: \n"
+"Language: nb\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#. module: crm_project_issue
-#: model:ir.ui.view,arch_db:crm_project_issue.crm_case_form_view_leads_project_issue
+#. module: crm_project
+#: model_terms:ir.ui.view,arch_db:crm_project.crm_lead_view_form
 msgid ""
 "<span class=\"o_stat_text\">Convert To</span>\n"
-"                            <span class=\"o_stat_text\">Issue</span>"
+"                            <span class=\"o_stat_text\">Task</span>"
 msgstr ""
+"<span class=\"o_stat_text\">Gjør om til</span>\n"
+"                            <span class=\"o_stat_text\">Oppgave</span>"
 
-#. module: crm_project_issue
-#: model:ir.ui.view,arch_db:crm_project_issue.view_crm_lead2projectissue_wizard
+#. module: crm_project
+#: model_terms:ir.ui.view,arch_db:crm_project.crm_lead_convert2task_view_form
 msgid "Cancel"
-msgstr "Avbryt"
+msgstr "Kanseller"
 
-#. module: crm_project_issue
-#: model:ir.actions.act_window,name:crm_project_issue.convert_lead2projectissue_wizard_action
-#: model:ir.ui.view,arch_db:crm_project_issue.crm_case_form_view_leads_project_issue
-#: model:ir.ui.view,arch_db:crm_project_issue.view_crm_lead2projectissue_wizard
-msgid "Convert to Issue"
-msgstr ""
+#. module: crm_project
+#: model:ir.actions.act_window,name:crm_project.crm_lead_convert2task_action
+#: model_terms:ir.ui.view,arch_db:crm_project.crm_lead_convert2task_view_form
+#: model_terms:ir.ui.view,arch_db:crm_project.crm_lead_view_form
+msgid "Convert to Task"
+msgstr "Gjør om til oppgave"
 
-#. module: crm_project_issue
-#: model:ir.ui.view,arch_db:crm_project_issue.view_crm_lead2projectissue_wizard
-msgid "Create Issue"
-msgstr ""
+#. module: crm_project
+#: model_terms:ir.ui.view,arch_db:crm_project.crm_lead_convert2task_view_form
+msgid "Create Task"
+msgstr "Opprett oppgave"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_create_uid
+#. module: crm_project
+#: selection:crm.lead.convert2task,action:0
+msgid "Create a new customer"
+msgstr "Opprett en ny kunde"
+
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__create_uid
 msgid "Created by"
 msgstr "Opprettet av"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_create_date
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__create_date
 msgid "Created on"
-msgstr "Opprettet den"
+msgstr "Opprettet"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_display_name
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__partner_id
+msgid "Customer"
+msgstr "Kunde"
+
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__display_name
 msgid "Display Name"
-msgstr "Visnings navn"
+msgstr "Visningsnavn"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_id
+#. module: crm_project
+#: selection:crm.lead.convert2task,action:0
+msgid "Do not link to a customer"
+msgstr "Ikke koble til en kunde"
+
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__id
 msgid "ID"
-msgstr "ID"
+msgstr "IDID"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard___last_update
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task____last_update
 msgid "Last Modified on"
-msgstr "Sist oppdatert "
+msgstr "Sist endret"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_write_uid
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__write_uid
 msgid "Last Updated by"
 msgstr "Sist oppdatert av"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_write_date
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__write_date
 msgid "Last Updated on"
 msgstr "Sist oppdatert"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_lead_id
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__lead_id
 msgid "Lead"
 msgstr "Lead"
 
-#. module: crm_project_issue
-#: model:ir.model.fields,field_description:crm_project_issue.field_crm_lead2projectissue_wizard_project_id
+#. module: crm_project
+#: model:ir.model,name:crm_project.model_crm_lead_convert2task
+msgid "Lead convert to Task"
+msgstr ""
+
+#. module: crm_project
+#: selection:crm.lead.convert2task,action:0
+msgid "Link to an existing customer"
+msgstr "Tilknytt eksisterende kunde"
+
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__project_id
 msgid "Project"
 msgstr "Prosjekt"
 
-#. module: crm_project_issue
-#: model:ir.model,name:crm_project_issue.model_crm_lead2projectissue_wizard
-msgid "crm.lead2projectissue.wizard"
-msgstr ""
-
-#~ msgid "Create a new customer"
-#~ msgstr "Opprett en ny kunde."
-
-#~ msgid "Customer"
-#~ msgstr "Kunde"
-
-#~ msgid "Do not link to a customer"
-#~ msgstr "Ikke koble til en kunde."
-
-#~ msgid "Link to an existing customer"
-#~ msgstr "Koble til en eksisterende kunde."
-
-#~ msgid "Related Customer"
-#~ msgstr "Relatert kunde."
+#. module: crm_project
+#: model:ir.model.fields,field_description:crm_project.field_crm_lead_convert2task__action
+msgid "Related Customer"
+msgstr "Tilknyttet kunde"

@@ -56,7 +56,10 @@ editor.Class.include({
 });
 
 rte.Class.include({
-    config: function ($editable) {
+    /**
+     * @override
+     */
+    _getDefaultConfig: function ($editable) {
         var config = this._super.apply(this, arguments);
         if ($.deparam($.param.querystring()).debug !== undefined) {
             config.airPopover.splice(7, 0, ['view', ['codeview']]);
@@ -79,7 +82,7 @@ translator.Class.include({
 
 //==============================================================================
 
-odoo.define('web_editor.IframeRoot.instance', function (require) {
+odoo.define('root.widget', function (require) {
 'use strict';
 
 require('web.dom_ready');

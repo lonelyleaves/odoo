@@ -167,10 +167,76 @@ QUnit.module('DomainSelector', {
         assert.strictEqual($datepicker.length, 1,
             "there should be a datepicker");
 
-        var val = $datepicker.find('input').focus().click().val();
+        var val = $datepicker.find('input').val();
+        testUtils.openDatepicker($datepicker);
         $('.bootstrap-datetimepicker-widget :not(.today)[data-action="selectDay"]').click();
         assert.notEqual(domainSelector.$(".o_datepicker:visible input").val(), val,
             "datepicker value should have changed");
+
+        domainSelector.destroy();
+    });
+
+    QUnit.test("building a domain with a m2o without following the relation", function (assert) {
+        assert.expect(1);
+
+        var $target = $("#qunit-fixture");
+
+        // Create the domain selector and its mock environment
+        var domainSelector = new DomainSelector(null, "partner", [["product_id", "ilike", 1]], {
+            debugMode: true,
+            readonly: false,
+        });
+        testUtils.addMockEnvironment(domainSelector, {data: this.data});
+        domainSelector.appendTo($target);
+
+        domainSelector.$('.o_domain_leaf_value_input').val('pad').trigger('input').trigger('change');
+        assert.strictEqual(domainSelector.$('.o_domain_debug_input').val(), '[["product_id","ilike","pad"]]',
+            "string should have been allowed as m2o value");
+
+        domainSelector.destroy();
+    });
+
+    QUnit.test("editing a domain with `parent` key", function (assert) {
+        assert.expect(1);
+
+        var $target = $("#qunit-fixture");
+
+        // Create the domain selector and its mock environment
+        var domainSelector = new DomainSelector(null, "product", "[['name','=',parent.foo]]", {
+            debugMode: true,
+            readonly: false,
+        });
+        testUtils.addMockEnvironment(domainSelector, {data: this.data});
+        domainSelector.appendTo($target);
+
+        assert.strictEqual(domainSelector.$el.text(), "This domain is not supported.",
+            "an error message should be displayed because of the `parent` key");
+
+        domainSelector.destroy();
+    });
+
+    QUnit.test("creating a domain with a default option", function (assert) {
+        assert.expect(1);
+
+        var $target = $("#qunit-fixture");
+
+        // Create the domain selector and its mock environment
+        var domainSelector = new DomainSelector(null, "partner", [], {
+            readonly: false,
+            debugMode: true,
+            default: [["foo","=","kikou"]],
+        });
+        testUtils.addMockEnvironment(domainSelector, {data: this.data});
+        domainSelector.appendTo($target);
+
+        // Clicking on the button should add a visible field selector in the
+        // widget so that the user can change the field chain
+        domainSelector.$(".o_domain_add_first_node_button:visible").click();
+
+        assert.strictEqual(
+            domainSelector.$(".o_domain_debug_input").val(),
+            '[["foo","=","kikou"]]',
+            "the domain input should contain the default domain");
 
         domainSelector.destroy();
     });

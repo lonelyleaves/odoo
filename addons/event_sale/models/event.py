@@ -5,6 +5,7 @@ from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError, UserError
 
 from odoo.addons import decimal_precision as dp
+from odoo.tools import float_is_zero
 
 
 class EventType(models.Model):
@@ -148,27 +149,53 @@ class EventTicket(models.Model):
     def _check_seats_limit(self):
         for record in self:
             if record.seats_max and record.seats_available < 0:
-                raise ValidationError(_('No more available seats for the ticket'))
+                raise ValidationError(_('No more available seats for this ticket type.'))
 
     @api.constrains('event_type_id', 'event_id')
     def _constrains_event(self):
         if any(ticket.event_type_id and ticket.event_id for ticket in self):
-            raise UserError(_('Ticket should belong to either event category or event but not both'))
+            raise UserError(_('Ticket cannot belong to both the event category and the event itself.'))
 
     @api.onchange('product_id')
     def _onchange_product_id(self):
         self.price = self.product_id.list_price or 0
 
+    def get_ticket_multiline_description_sale(self):
+        """ Compute a multiline description of this ticket, in the context of sales.
+            It will often be used as the default description of a sales order line referencing this ticket.
+
+        1. the first line is the ticket name
+        2. the second line is the event name (if it exists, which should be the case with a normal workflow) or the product name (if it exists)
+
+        We decided to ignore entirely the product name and the product description_sale because they are considered to be replaced by the ticket name and event name.
+            -> the workflow of creating a new event also does not lead to filling them correctly, as the product is created through the event interface
+        """
+
+        name = self.display_name
+
+        if self.event_id:
+            name += '\n' + self.event_id.display_name
+        elif self.product_id:
+            name += '\n' + self.product_id.display_name
+
+        return name
+
 
 class EventRegistration(models.Model):
     _inherit = 'event.registration'
 
-    event_ticket_id = fields.Many2one('event.event.ticket', string='Event Ticket')
+    event_ticket_id = fields.Many2one('event.event.ticket', string='Event Ticket', readonly=True, states={'draft': [('readonly', False)]})
     # in addition to origin generic fields, add real relational fields to correctly
     # handle attendees linked to sales orders and their lines
     # TDE FIXME: maybe add an onchange on sale_order_id + origin
     sale_order_id = fields.Many2one('sale.order', string='Source Sales Order', ondelete='cascade')
     sale_order_line_id = fields.Many2one('sale.order.line', string='Sales Order Line', ondelete='cascade')
+
+    @api.onchange('event_id')
+    def _onchange_event_id(self):
+        # We reset the ticket when keeping it would lead to an inconstitent state.
+        if self.event_ticket_id and (not self.event_id or self.event_id != self.event_ticket_id.event_id):
+            self.event_ticket_id = None
 
     @api.multi
     @api.constrains('event_ticket_id', 'state')
@@ -222,7 +249,8 @@ class EventRegistration(models.Model):
         information.append((_('Name'), self.name))
         information.append((_('Ticket'), self.event_ticket_id.name or _('None')))
         order = self.sale_order_id.sudo()
-        if not order:
+        order_line = self.sale_order_line_id.sudo()
+        if not order or float_is_zero(order_line.price_total, precision_digits=order.currency_id.rounding):
             payment_status = _('Free')
         elif not order.invoice_ids or any(invoice.state != 'paid' for invoice in order.invoice_ids):
             payment_status = _('To pay')

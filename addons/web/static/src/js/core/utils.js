@@ -24,6 +24,22 @@ var utils = {
         }
     },
     /**
+     * Check if the value is a bin_size or not.
+     * If not, compute an approximate size out of the base64 encoded string.
+     *
+     * @param  {string} value original format
+     * @return {string} bin_size (human-readable)
+     */
+    binaryToBinsize: function (value) {
+        if (!this.is_bin_size(value)) {
+            // Computing approximate size out of base64 encoded string
+            // http://en.wikipedia.org/wiki/Base64#MIME
+            return this.human_size(value.length / 1.37);
+        }
+        // already bin_size
+        return value;
+    },
+    /**
      * Confines a value inside an interval
      *
      * @param {number} [val] the value to confine
@@ -34,20 +50,6 @@ var utils = {
      */
     confine: function (val, min, max) {
         return Math.max(min, Math.min(max, val));
-    },
-    /**
-     * computes (Math.floor(a/b), a%b and passes that to the callback.
-     *
-     * returns the callback's result
-     */
-    divmod: function (a, b, fn) {
-        var mod = a%b;
-        // in python, sign(a % b) === sign(b). Not in JS. If wrong side, add a
-        // round of b
-        if (mod > 0 && b < 0 || mod < 0 && b > 0) {
-            mod += b;
-        }
-        return fn(Math.floor(a/b), mod);
     },
     /**
      * @param {number} value
@@ -132,7 +134,7 @@ var utils = {
             size /= 1024;
             ++i;
         }
-        return size.toFixed(2) + ' ' + units[i];
+        return size.toFixed(2) + ' ' + units[i].trim();
     },
     /**
      * Insert "thousands" separators in the provided number (which is actually
@@ -212,7 +214,7 @@ var utils = {
      * @returns {boolean}
      */
     is_bin_size: function (v) {
-        return (/^\d+(\.\d*)? \w+$/).test(v);
+        return (/^\d+(\.\d*)? [^0-9]+$/).test(v);
     },
     /**
      * @param {any} node
@@ -272,17 +274,6 @@ var utils = {
     lpad: function (str, size) {
         str = "" + str;
         return new Array(size - str.length + 1).join('0') + str;
-    },
-    /**
-     * Passes the fractional and integer parts of x to the callback, returns
-     * the callback's result
-     */
-    modf: function (x, fn) {
-        var mod = x%1;
-        if (mod < 0) {
-            mod += 1;
-        }
-        return fn(mod, Math.floor(x));
     },
     /**
      * performs a half up rounding with a fixed amount of decimals, correcting for float loss of precision
@@ -349,6 +340,23 @@ var utils = {
         ].join(';');
     },
     /**
+     * Sort an array in place, keeping the initial order for identical values.
+     *
+     * @param {Array} array
+     * @param {function} iteratee
+     */
+    stableSort: function (array, iteratee) {
+        var stable = array.slice();
+        return array.sort(function stableCompare (a, b) {
+            var order = iteratee(a, b);
+            if (order !== 0) {
+                return order;
+            } else {
+                return stable.indexOf(a) - stable.indexOf(b);
+            }
+        });
+    },
+    /**
      * @param {any} array
      * @param {any} elem1
      * @param {any} elem2
@@ -359,6 +367,23 @@ var utils = {
         array[i2] = elem1;
         array[i1] = elem2;
     },
+
+    /**
+     * @param {string} value
+     * @param {boolean} allow_mailto
+     * @returns boolean
+     */
+    is_email: function (value, allow_mailto) {
+        // http://stackoverflow.com/questions/46155/validate-email-address-in-javascript
+        var re;
+        if (allow_mailto) {
+            re = /^(mailto:)?(([^<>()\[\]\.,;:\s@\"]+(\.[^<>()\[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$/i;
+        } else {
+            re = /^(([^<>()\[\]\.,;:\s@\"]+(\.[^<>()\[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$/i;
+        }
+        return re.test(value);
+    },
+
     /**
      * @param {any} str
      * @param {any} elseValues
@@ -458,6 +483,20 @@ var utils = {
         }
     },
     /**
+     * Enhanced traverse function with 'path' building on traverse.
+     *
+     * @param {Object} tree an object describing a tree structure
+     * @param {function} f a callback
+     * @param {Object} path the path to the current 'tree' object
+     */
+    traversePath: function (tree, f, path) {
+        path = path || [];
+        f(tree, path);
+        _.each(tree.children, function (node) {
+            utils.traversePath(node, f, path.concat(tree));
+        });
+    },
+    /**
      * Visit a tree of objects and freeze all
      *
      * @param {Object} obj
@@ -470,6 +509,26 @@ var utils = {
           utils.deepFreeze(prop);
       });
       return Object.freeze(obj);
+    },
+
+    /**
+     * Find the closest value of the given one in the provided array
+     *
+     * @param {Number} num
+     * @param {Array} arr
+     * @returns {Number|undefined}
+     */
+    closestNumber: function (num, arr) {
+        var curr = arr[0];
+        var diff = Math.abs (num - curr);
+        for (var val = 0; val < arr.length; val++) {
+            var newdiff = Math.abs (num - arr[val]);
+            if (newdiff < diff) {
+                diff = newdiff;
+                curr = arr[val];
+            }
+        }
+        return curr;
     },
 
 };

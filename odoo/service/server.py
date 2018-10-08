@@ -36,7 +36,8 @@ except ImportError:
     setproctitle = lambda x: None
 
 import odoo
-from odoo.modules.module import run_unit_tests, runs_post_install
+from odoo.modules import get_modules
+from odoo.modules.module import run_unit_tests, get_test_modules
 from odoo.modules.registry import Registry
 from odoo.release import nt_service_name
 from odoo.tools import config
@@ -92,9 +93,6 @@ class RequestHandler(werkzeug.serving.WSGIRequestHandler):
         me = threading.currentThread()
         me.name = 'odoo.service.http.request.%s' % (me.ident,)
 
-# _reexec() should set LISTEN_* to avoid connection refused during reload time. It
-# should also work with systemd socket activation. This is currently untested
-# and not yet used.
 
 class ThreadedWSGIServerReloadable(LoggingBaseWSGIServerMixIn, werkzeug.serving.ThreadedWSGIServer):
     """ werkzeug Threaded WSGI Server patched to allow reusing a listen socket
@@ -106,14 +104,15 @@ class ThreadedWSGIServerReloadable(LoggingBaseWSGIServerMixIn, werkzeug.serving.
                                                            handler=RequestHandler)
 
     def server_bind(self):
-        envfd = os.environ.get('LISTEN_FDS')
-        if envfd and os.environ.get('LISTEN_PID') == str(os.getpid()):
+        SD_LISTEN_FDS_START = 3
+        if os.environ.get('LISTEN_FDS') == '1' and os.environ.get('LISTEN_PID') == str(os.getpid()):
             self.reload_socket = True
-            self.socket = socket.fromfd(int(envfd), socket.AF_INET, socket.SOCK_STREAM)
-            # should we os.close(int(envfd)) ? it seem python duplicate the fd.
+            self.socket = socket.fromfd(SD_LISTEN_FDS_START, socket.AF_INET, socket.SOCK_STREAM)
+            _logger.info('HTTP service (werkzeug) running through socket activation')
         else:
             self.reload_socket = False
             super(ThreadedWSGIServerReloadable, self).server_bind()
+            _logger.info('HTTP service (werkzeug) running on %s:%s', self.server_name, self.server_port)
 
     def server_activate(self):
         if not self.reload_socket:
@@ -133,15 +132,16 @@ class FSWatcher(object):
         if isinstance(event, (FileCreatedEvent, FileModifiedEvent, FileMovedEvent)):
             if not event.is_directory:
                 path = getattr(event, 'dest_path', event.src_path)
-                if path.endswith('.py'):
+                if path.endswith('.py') and not os.path.basename(path).startswith('.~'):
                     try:
                         source = open(path, 'rb').read() + b'\n'
                         compile(source, path, 'exec')
                     except SyntaxError:
                         _logger.error('autoreload: python code change detected, SyntaxError in %s', path)
                     else:
-                        _logger.info('autoreload: python code updated, autoreload activated')
-                        restart()
+                        if not getattr(odoo, 'phoenix', False):
+                            _logger.info('autoreload: python code updated, autoreload activated')
+                            restart()
 
     def start(self):
         self.observer.start()
@@ -206,6 +206,10 @@ class ThreadedServer(CommonServer):
                 os._exit(0)
             # interrupt run() to start shutdown
             raise KeyboardInterrupt()
+        elif sig == signal.SIGXCPU:
+            sys.stderr.write("CPU time limit exceeded! Shutting down immediately\n")
+            sys.stderr.flush()
+            os._exit(0)
         elif sig == signal.SIGHUP:
             # restart on kill -HUP
             odoo.phoenix = True
@@ -214,20 +218,17 @@ class ThreadedServer(CommonServer):
             raise KeyboardInterrupt()
 
     def cron_thread(self, number):
-        from odoo.addons.base.ir.ir_cron import ir_cron
+        from odoo.addons.base.models.ir_cron import ir_cron
         while True:
             time.sleep(SLEEP_INTERVAL + number)     # Steve Reich timing style
             registries = odoo.modules.registry.Registry.registries
             _logger.debug('cron%d polling for jobs', number)
             for db_name, registry in registries.items():
-                while registry.ready:
+                if registry.ready:
                     try:
-                        acquired = ir_cron._acquire_job(db_name)
-                        if not acquired:
-                            break
+                        ir_cron._acquire_job(db_name)
                     except Exception:
                         _logger.warning('cron%d encountered an Exception:', number, exc_info=True)
-                        break
 
     def cron_spawn(self):
         """ Start the above runner function in a daemon thread.
@@ -259,7 +260,6 @@ class ThreadedServer(CommonServer):
         t = threading.Thread(target=self.http_thread, name="odoo.service.httpd")
         t.setDaemon(True)
         t.start()
-        _logger.info('HTTP service (werkzeug) running on %s:%s', self.interface, self.port)
 
     def start(self, stop=False):
         _logger.debug("Setting signal handlers")
@@ -268,6 +268,7 @@ class ThreadedServer(CommonServer):
             signal.signal(signal.SIGTERM, self.signal_handler)
             signal.signal(signal.SIGCHLD, self.signal_handler)
             signal.signal(signal.SIGHUP, self.signal_handler)
+            signal.signal(signal.SIGXCPU, self.signal_handler)
             signal.signal(signal.SIGQUIT, dumpstacks)
             signal.signal(signal.SIGUSR1, log_ormcache_stats)
         elif os.name == 'nt':
@@ -365,17 +366,20 @@ class GeventServer(CommonServer):
 
     def start(self):
         import gevent
-        from gevent.wsgi import WSGIServer
+        try:
+            from gevent.pywsgi import WSGIServer
+        except ImportError:
+            from gevent.wsgi import WSGIServer
 
-        # Set process memory limit as an extra safeguard
-        _, hard = resource.getrlimit(resource.RLIMIT_AS)
-        resource.setrlimit(resource.RLIMIT_AS, (config['limit_memory_hard'], hard))
 
         if os.name == 'posix':
+            # Set process memory limit as an extra safeguard
+            _, hard = resource.getrlimit(resource.RLIMIT_AS)
+            resource.setrlimit(resource.RLIMIT_AS, (config['limit_memory_hard'], hard))
             signal.signal(signal.SIGQUIT, dumpstacks)
             signal.signal(signal.SIGUSR1, log_ormcache_stats)
+            gevent.spawn(self.watchdog)
 
-        gevent.spawn(self.watchdog)
         self.httpd = WSGIServer((self.interface, self.port), self.app)
         _logger.info('Evented Service (longpolling) running on %s:%s', self.interface, self.port)
         try:
@@ -829,8 +833,7 @@ class WorkerCron(Worker):
                 start_rss, start_vms = memory_info(psutil.Process(os.getpid()))
 
             from odoo.addons import base
-            base.ir.ir_cron.ir_cron._acquire_job(db_name)
-            odoo.modules.registry.Registry.delete(db_name)
+            base.models.ir_cron.ir_cron._acquire_job(db_name)
 
             # dont keep cursors in multi database mode
             if len(db_names) > 1:
@@ -864,7 +867,8 @@ class WorkerCron(Worker):
 server = None
 
 def load_server_wide_modules():
-    for m in odoo.conf.server_wide_modules:
+    server_wide_modules = {'base', 'web'} | set(odoo.conf.server_wide_modules)
+    for m in server_wide_modules:
         try:
             odoo.modules.module.load_openerp_module(m)
         except Exception:
@@ -885,36 +889,31 @@ def _reexec(updated_modules=None):
         args += ["-u", ','.join(updated_modules)]
     if not args or args[0] != exe:
         args.insert(0, exe)
-    os.execv(sys.executable, args)
-
-def load_test_file_yml(registry, test_file):
-    with registry.cursor() as cr:
-        odoo.tools.convert_yaml_import(cr, 'base', open(test_file, 'rb'), 'test', {}, 'init')
-        if config['test_commit']:
-            _logger.info('test %s has been commited', test_file)
-            cr.commit()
-        else:
-            _logger.info('test %s has been rollbacked', test_file)
-            cr.rollback()
+    # We should keep the LISTEN_* environment variabled in order to support socket activation on reexec
+    os.execve(sys.executable, args, os.environ)
 
 def load_test_file_py(registry, test_file):
-    # Locate python module based on its filename and run the tests
-    test_path, _ = os.path.splitext(os.path.abspath(test_file))
-    for mod_name, mod_mod in list(sys.modules.items()):
-        if mod_mod:
-            mod_path, _ = os.path.splitext(getattr(mod_mod, '__file__', ''))
-            if test_path == mod_path:
-                suite = unittest.TestSuite()
-                for t in unittest.TestLoader().loadTestsFromModule(mod_mod):
-                    suite.addTest(t)
-                _logger.log(logging.INFO, 'running tests %s.', mod_mod.__name__)
-                stream = odoo.modules.module.TestStream()
-                result = unittest.TextTestRunner(verbosity=2, stream=stream).run(suite)
-                success = result.wasSuccessful()
-                if hasattr(registry._assertion_report,'report_result'):
-                    registry._assertion_report.report_result(success)
-                if not success:
-                    _logger.error('%s: at least one error occurred in a test', test_file)
+    threading.currentThread().testing = True
+    try:
+        test_path, _ = os.path.splitext(os.path.abspath(test_file))
+        for mod in [m for m in get_modules() if '/%s/' % m in test_file]:
+            for mod_mod in get_test_modules(mod):
+                mod_path, _ = os.path.splitext(getattr(mod_mod, '__file__', ''))
+                if test_path == mod_path:
+                    suite = unittest.TestSuite()
+                    for t in unittest.TestLoader().loadTestsFromModule(mod_mod):
+                        suite.addTest(t)
+                    _logger.log(logging.INFO, 'running tests %s.', mod_mod.__name__)
+                    stream = odoo.modules.module.TestStream()
+                    result = unittest.TextTestRunner(verbosity=2, stream=stream).run(suite)
+                    success = result.wasSuccessful()
+                    if hasattr(registry._assertion_report,'report_result'):
+                        registry._assertion_report.report_result(success)
+                    if not success:
+                        _logger.error('%s: at least one error occurred in a test', test_file)
+                    return
+    finally:
+        threading.currentThread().testing = False
 
 def preload_registries(dbnames):
     """ Preload a registries, possibly run a test file."""
@@ -931,9 +930,7 @@ def preload_registries(dbnames):
                 test_file = config['test_file']
                 _logger.info('loading test file %s', test_file)
                 with odoo.api.Environment.manage():
-                    if test_file.endswith('yml'):
-                        load_test_file_yml(registry, test_file)
-                    elif test_file.endswith('py'):
+                    if test_file.endswith('py'):
                         load_test_file_py(registry, test_file)
 
             # run post-install tests
@@ -942,10 +939,11 @@ def preload_registries(dbnames):
                 t0_sql = odoo.sql_db.sql_counter
                 module_names = (registry.updated_modules if update_module else
                                 registry._init_modules)
+                _logger.info("Starting post tests")
                 with odoo.api.Environment.manage():
                     for module_name in module_names:
                         result = run_unit_tests(module_name, registry.db_name,
-                                                position=runs_post_install)
+                                                position='post_install')
                         registry._assertion_report.record_result(result)
                 _logger.info("All post-tested in %.2fs, %s queries",
                              time.time() - t0, odoo.sql_db.sql_counter - t0_sql)
@@ -961,7 +959,10 @@ def start(preload=None, stop=False):
     """ Start the odoo http server and cron processor.
     """
     global server
+
     load_server_wide_modules()
+    odoo.service.wsgi_server._patch_xmlrpc_marshaller()
+
     if odoo.evented:
         server = GeventServer(odoo.service.wsgi_server.application)
     elif config['workers']:
@@ -969,6 +970,11 @@ def start(preload=None, stop=False):
             _logger.warning("Unit testing in workers mode could fail; use --workers 0.")
 
         server = PreforkServer(odoo.service.wsgi_server.application)
+
+        # Workaround for Python issue24291, fixed in 3.6 (see Python issue26721)
+        if sys.version_info[:2] == (3,5):
+            # turn on buffering also for wfile, to avoid partial writes (Default buffer = 8k)
+            werkzeug.serving.WSGIRequestHandler.wbufsize = -1
     else:
         server = ThreadedServer(odoo.service.wsgi_server.application)
 

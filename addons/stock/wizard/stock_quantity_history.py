@@ -12,7 +12,7 @@ class StockQuantityHistory(models.TransientModel):
         (0, 'Current Inventory'),
         (1, 'At a Specific Date')
     ], string="Compute", help="Choose to analyze the current inventory or from a specific date in the past.")
-    date = fields.Datetime('Inventory at Date', help="Choose a date to get the inventory at that date", default=fields.Datetime.now())
+    date = fields.Datetime('Inventory at Date', help="Choose a date to get the inventory at that date", default=fields.Datetime.now)
 
     def open_table(self):
         self.ensure_one()
@@ -33,4 +33,5 @@ class StockQuantityHistory(models.TransientModel):
             return action
         else:
             self.env['stock.quant']._merge_quants()
+            self.env['stock.quant']._unlink_zero_quants()
             return self.env.ref('stock.quantsact').read()[0]

@@ -13,11 +13,64 @@ var range = $.summernote.core.range;
 var list = $.summernote.core.list;
 var key = $.summernote.core.key;
 var eventHandler = $.summernote.eventHandler;
-// var editor = eventHandler.modules.editor;
+var editor = eventHandler.modules.editor;
 var renderer = $.summernote.renderer;
 var options = $.summernote.options;
 
+// Browser-unify execCommand
+var oldJustify = {};
+_.each(['Left', 'Right', 'Full', 'Center'], function (align) {
+    oldJustify[align] = editor['justify' + align];
+    editor['justify' + align] = function ($editable, value) {
+        // Before calling the standard function, check all elements which have
+        // an 'align' attribute and mark them with their value
+        var $align = $editable.find('[align]');
+        _.each($align, function (el) {
+            var $el = $(el);
+            $el.data('__align', $el.attr('align'));
+        });
+
+        // Call the standard function
+        oldJustify[align].apply(this, arguments);
+
+        // Then:
+
+        // Remove the text-align of elements which lost the 'align' attribute
+        var $newAlign = $editable.find('[align]');
+        $align.not($newAlign).css('text-align', '');
+
+        // Transform the 'align' attribute into the 'text-align' css
+        // property for elements which received the 'align' attribute or whose
+        // 'align' attribute changed
+        _.each($newAlign, function (el) {
+            var $el = $(el);
+
+            var oldAlignValue = $align.data('__align');
+            var alignValue = $el.attr('align');
+            if (oldAlignValue === alignValue) {
+                // If the element already had an 'align' attribute and that it
+                // did not changed, do nothing (compatibility)
+                return;
+            }
+
+            $el.removeAttr('align');
+            $el.css('text-align', alignValue);
+
+            // Note the first step (removing the text-align of elemnts which
+            // lost the 'align' attribute) is kinda the same as this one, but
+            // this one handles the elements which have been edited with chrome
+            // or with this new system
+            $el.find('*').css('text-align', '');
+        });
+
+        // Unmark the elements
+        $align.removeData('__align');
+    };
+});
+
+
 // Add methods to summernote
+
 dom.hasContentAfter = function (node) {
     var next;
     if (dom.isEditable(node)) return;
@@ -539,6 +592,13 @@ dom.removeBetween = function (sc, so, ec, eo, towrite) {
         so = 0;
         eo = 1;
     }
+
+    var parentNode = sc && sc.parentNode;
+    if (parentNode && sc.tagName === 'BR') {
+        sc = parentNode;
+        ec = parentNode;
+    }
+
     return {
         sc: sc,
         so: so,
@@ -634,10 +694,16 @@ dom.isRemovableEmptyNode = function (node) {
 dom.isForbiddenNode = function (node) {
     return node.tagName === "BR" || $(node).is(".fa, img");
 };
-dom.listBetween = function (sc, ec) {
+/**
+ * @todo 'so' and 'eo' were added as a bugfix and are not given everytime. They
+ * however should be as the function may be wrong without them (for example,
+ * when asking the list between an element and its parent, as there is no path
+ * from the beginning of the former to the beginning of the later).
+ */
+dom.listBetween = function (sc, ec, so, eo) {
     var nodes = [];
     var ancestor = dom.commonAncestor(sc, ec);
-    dom.walkPoint({'node': sc, 'offset': 0}, {'node': ec, 'offset': 0}, function (point) {
+    dom.walkPoint({'node': sc, 'offset': so || 0}, {'node': ec, 'offset': eo || 0}, function (point) {
         if (ancestor !== point.node || ancestor === sc || ancestor === ec) {
             nodes.push(point.node);
         }
@@ -786,46 +852,82 @@ range.WrappedRange.prototype.reRange = function (keep_end, isNotBreakable) {
 
     return new range.WrappedRange(sc, so, ec, eo);
 };
-// isOnImg: judge whether range is an image node or not
+/**
+ * Returns the image the range is in or matches (if any, false otherwise).
+ *
+ * @todo this implementation may not cover all corner cases but should do the
+ * trick for all reproductible ones
+ * @returns {DOMElement|boolean}
+ */
 range.WrappedRange.prototype.isOnImg = function () {
+    // If not a selection but a cursor position, just check if a point's
+    // ancestor is an image or not
+    if (this.sc === this.ec && this.so === this.eo) {
+        return dom.ancestor(this.sc, dom.isImg);
+    }
+
+    var startPoint = {node: this.sc, offset: this.so};
+    var endPoint = {node: this.ec, offset: this.eo};
+
     var nb = 0;
     var image;
-    var startPoint = {node: this.sc.childNodes.length && this.sc.childNodes[this.so] || this.sc};
-    startPoint.offset = startPoint.node === this.sc ? this.so : 0;
-    var endPoint = {node: this.ec.childNodes.length && this.ec.childNodes[this.eo] || this.ec};
-    endPoint.offset = endPoint.node === this.ec ? this.eo : 0;
-
-    if (dom.isImg(startPoint.node)) {
-        nb ++;
-        image = startPoint.node;
-    }
+    var textNode;
     dom.walkPoint(startPoint, endPoint, function (point) {
-        if (!dom.isText(endPoint.node) && point.node === endPoint.node && point.offset === endPoint.offset) {
+        // If the element has children (not a text node and not empty node),
+        // the element cannot be considered as selected (these children will
+        // be processed to determine that)
+        if (dom.hasChildren(point.node)) {
             return;
         }
-        var node = point.node.childNodes.length && point.node.childNodes[point.offset] || point.node;
-        var offset = node === point.node ? point.offset : 0;
-        var isImg = dom.ancestor(node, dom.isImg);
-        if (!isImg && ((!dom.isBR(node) && !dom.isText(node)) || (offset && node.textContent.length !== offset && node.textContent.match(/\S|\u00A0/)))) {
+
+        // Check if an ancestor of the current point is an image
+        var pointImg = dom.ancestor(point.node, dom.isImg);
+        var isText = dom.isText(point.node);
+
+        // Check if a visible element is selected, i.e.
+        // - If an ancestor of the current is an image we did not see yet
+        // - If the point is not in a br or a text (so a node with no children)
+        // - If the point is in a non empty text node we already saw
+        if (pointImg ?
+            (image !== pointImg) :
+            ((!dom.isBR(point.node) && !isText) || (textNode === point.node && point.node.textContent.match(/\S|\u00A0/)))) {
             nb++;
         }
-        if (isImg && image !== isImg) {
-            image = isImg;
-            nb ++;
+
+        // If an ancestor of the current point is an image, then save it as the
+        // image we are looking for
+        if (pointImg) {
+            image = pointImg;
+        }
+        // If the current point is a text node save it as the last text node
+        // seen (if we see it again, this might mean it is selected)
+        if (isText) {
+            textNode = point.node;
         }
     });
+
     return nb === 1 && image;
 };
 range.WrappedRange.prototype.deleteContents = function (towrite) {
-    var prevBP = dom.removeBetween(this.sc, this.so, this.ec, this.eo, towrite);
+    if (this.sc === this.ec && this.so === this.eo) {
+        return this;
+    }
 
-    $(dom.node(prevBP.sc)).trigger("click"); // trigger click to disable and reanable editor and image handler
-    return new range.WrappedRange(
-      prevBP.sc,
-      prevBP.so,
-      prevBP.ec,
-      prevBP.eo
-    );
+    var r;
+    var image = this.isOnImg();
+    if (image) {
+        // If the range matches/is in an image, then the image is to be removed
+        // and the cursor moved to its previous position
+        var parentNode = image.parentNode;
+        var index = _.indexOf(parentNode.childNodes, image);
+        parentNode.removeChild(image);
+        r = new range.WrappedRange(parentNode, index, parentNode, index);
+    } else {
+        r = dom.removeBetween(this.sc, this.so, this.ec, this.eo, towrite);
+    }
+
+    $(dom.node(r.sc)).trigger("click"); // trigger click to disable and reanable editor and image handler
+    return new range.WrappedRange(r.sc, r.so, r.ec, r.eo);
 };
 range.WrappedRange.prototype.clean = function (mergeFilter, all) {
     var node = dom.node(this.sc === this.ec ? this.sc : this.commonAncestor());
@@ -856,17 +958,60 @@ range.WrappedRange.prototype.isContentEditable = function () {
 
 renderer.tplButtonInfo.fontsize = function (lang, options) {
     var items = options.fontSizes.reduce(function (memo, v) {
-        return memo + '<li><a data-event="fontSize" href="#" data-value="' + v + '">' +
+        return memo + '<a data-event="fontSize" href="#" class="dropdown-item" data-value="' + v + '">' +
                   '<i class="fa fa-check"></i> ' + v +
-                '</a></li>';
+                '</a>';
     }, '');
 
     var sLabel = '<span class="note-current-fontsize">11</span>';
     return renderer.getTemplate().button(sLabel, {
         title: lang.font.size,
-        dropdown: '<ul class="dropdown-menu">' + items + '</ul>'
+        dropdown: '<div class="dropdown-menu">' + items + '</div>'
     });
 };
+
+renderer.tplButtonInfo.color = function (lang, options) {
+    var foreColorButtonLabel = '<i class="' + options.iconPrefix + options.icons.color.recent + '"></i>';
+    var backColorButtonLabel = '<i class="' + options.iconPrefix + 'paint-brush"></i>';
+    // TODO Remove recent color button if possible.
+    // It is still put to avoid JS errors when clicking other buttons as the
+    // editor still expects it to exist.
+    var recentColorButton = renderer.getTemplate().button(foreColorButtonLabel, {
+        className: 'note-recent-color d-none',
+        title: lang.color.foreground,
+        event: 'color',
+        value: '{"backColor":"#B35E9B"}'
+    });
+    var foreColorItems = [
+        '<li><div class="btn-group flex-column">',
+        '<div class="note-color-palette" data-target-event="foreColor"></div>',
+        '<h6 class="note-custom-color mt8" data-event="customColor" data-value="foreColor" title="' + lang.color.custom + '">',
+        lang.color.custom + '</h6>',
+        '<div class="note-custom-color-palette" data-target-event="foreColor"></div>',
+        '</div></li>',
+    ];
+    var backColorItems = [
+        '<li><div class="btn-group flex-column">',
+        '<div class="note-color-reset" data-event="backColor" data-value="inherit" title="' + lang.color.transparent + '">',
+        lang.color.setTransparent + '</div>',
+        '<div class="note-color-palette" data-target-event="backColor"></div>',
+        '<h6 class="note-custom-color mt8" data-event="customColor" data-value="backColor" title="' + lang.color.custom + '">',
+        lang.color.custom + '</h6>',
+        '<div class="note-custom-color-palette" data-target-event="backColor"></div>',
+        '</div></li>',
+    ];
+    var foreColorButton = renderer.getTemplate().button(foreColorButtonLabel, {
+        className: 'note-fore-color-preview mx-1',
+        title: lang.color.foreground,
+        dropdown: renderer.getTemplate().dropdown(foreColorItems)
+    });
+    var backColorButton = renderer.getTemplate().button(backColorButtonLabel, {
+        className: 'note-back-color-preview mx-1',
+        title: lang.color.background,
+        dropdown: renderer.getTemplate().dropdown(backColorItems)
+    });
+    return recentColorButton + foreColorButton + backColorButton;
+},
 
 //::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -888,7 +1033,7 @@ options.keyMap.mac['ESCAPE'] = 'cancel';
 options.keyMap.mac['UP'] = 'up';
 options.keyMap.mac['DOWN'] = 'down';
 
-options.styleTags = ['p', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'];
+options.styleTags = ['p', 'pre', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'];
 
 $.summernote.pluginEvents.insertTable = function (event, editor, layoutInfo, sDim) {
   var $editable = layoutInfo.editable();
@@ -958,10 +1103,12 @@ $.summernote.pluginEvents.tab = function (event, editor, layoutInfo, outdent) {
             } else {
                 r = dom.merge(r.sc.parentNode, r.sc, r.so, r.ec, r.eo, null, true);
                 r = range.create(r.sc, r.so, r.ec, r.eo);
-                next = r.sc.splitText(r.so);
-                r.sc.textContent = r.sc.textContent.replace(/(\u00A0)+$/g, '');
-                next.textContent = next.textContent.replace(/^(\u00A0)+/g, '');
-                range.create(r.sc, r.sc.textContent.length, r.sc, r.sc.textContent.length).select();
+                if (r.sc.splitText) {
+                    next = r.sc.splitText(r.so);
+                    r.sc.textContent = r.sc.textContent.replace(/(\u00A0)+$/g, '');
+                    next.textContent = next.textContent.replace(/^(\u00A0)+/g, '');
+                    range.create(r.sc, r.sc.textContent.length, r.sc, r.sc.textContent.length).select();
+                }
             }
         }
     }
@@ -973,7 +1120,14 @@ $.summernote.pluginEvents.untab = function (event, editor, layoutInfo) {
 $.summernote.pluginEvents.up = function (event, editor, layoutInfo) {
     var r = range.create();
     var node = dom.firstChild(r.sc.childNodes[r.so] || r.sc);
-    if (!r.isOnCell() || (!dom.isCell(node) && dom.hasContentBefore(node) && (!dom.isBR(dom.hasContentBefore(node)) || !dom.isText(node) || dom.isVisibleText(node) || dom.hasContentBefore(dom.hasContentBefore(node))))) {
+    if (!r.isOnCell()) {
+        return;
+    }
+    // check if an ancestor between node and cell has content before
+    var ancestor = dom.ancestor(node, function (ancestorNode) {
+        return dom.hasContentBefore(ancestorNode) || dom.isCell(ancestorNode);
+    });
+    if (!dom.isCell(ancestor) && (!dom.isBR(dom.hasContentBefore(ancestor)) || !dom.isText(node) || dom.isVisibleText(node) || dom.hasContentBefore(dom.hasContentBefore(ancestor)))) {
         return;
     }
     event.preventDefault();
@@ -990,7 +1144,14 @@ $.summernote.pluginEvents.up = function (event, editor, layoutInfo) {
 $.summernote.pluginEvents.down = function (event, editor, layoutInfo) {
     var r = range.create();
     var node = dom.firstChild(r.sc.childNodes[r.so] || r.sc);
-    if (!r.isOnCell() || (!dom.isCell(node) && dom.hasContentAfter(node) && (!dom.isBR(dom.hasContentAfter(node)) || !dom.isText(node) || dom.isVisibleText(node) || dom.hasContentAfter(dom.hasContentAfter(node))))) {
+    if (!r.isOnCell()) {
+        return;
+    }
+    // check if an ancestor between node and cell has content after
+    var ancestor = dom.ancestor(node, function (ancestorNode) {
+        return dom.hasContentAfter(ancestorNode) || dom.isCell(ancestorNode);
+    });
+    if (!dom.isCell(ancestor) && (!dom.isBR(dom.hasContentAfter(ancestor)) || !dom.isText(node) || dom.isVisibleText(node) || dom.hasContentAfter(dom.hasContentAfter(ancestor)))) {
         return;
     }
     event.preventDefault();
@@ -1130,9 +1291,9 @@ $.summernote.pluginEvents.visible = function (event, editor, layoutInfo) {
     if (!r) return;
 
     if (!r.isCollapsed()) {
-        if (dom.isCell(dom.node(r.sc)) || dom.isCell(dom.node(r.ec))) {
+        if ((dom.isCell(dom.node(r.sc)) || dom.isCell(dom.node(r.ec))) && dom.node(r.sc) !== dom.node(r.ec)) {
             remove_table_content(r);
-            r = range.create(r.ec, 0).select();
+            r = range.create(r.ec, 0);
         }
         r.select();
     }
@@ -1162,7 +1323,7 @@ $.summernote.pluginEvents.visible = function (event, editor, layoutInfo) {
 };
 
 function remove_table_content(r) {
-    var nodes = dom.listBetween(r.sc, r.ec);
+    var nodes = dom.listBetween(r.sc, r.ec, r.so, r.eo);
     if (dom.isText(r.sc)) {
         r.sc.textContent = r.sc.textContent.slice(0, r.so);
     }
@@ -1698,12 +1859,17 @@ $.summernote.pluginEvents.indent = function (event, editor, layoutInfo, outdent)
     var $dom = $(ancestor);
 
     if (!dom.isList(ancestor)) {
+        // to indent a selection, we indent the child nodes of the common
+        // ancestor that contains this selection
         $dom = $(dom.node(ancestor)).children();
     }
-    if (!$dom.length) {
-        $dom = $(dom.ancestor(r.sc, dom.isList) || dom.ancestor(r.sc, dom.isCell));
+    if (!$dom.not('br').length) {
+        // if selection is inside a list, we indent its list items
+        $dom = $(dom.ancestor(r.sc, dom.isList));
         if (!$dom.length) {
-            $dom = $(r.sc).closest(options.styleTags.join(','));
+            // if the selection is contained in a single HTML node, we indent
+            // the first ancestor 'content block' (P, H1, PRE, ...) or TD
+            $dom = $(r.sc).closest(options.styleTags.join(',')+',td');
         }
     }
 
@@ -1761,6 +1927,7 @@ $.summernote.pluginEvents.outdent = function (event, editor, layoutInfo) {
 };
 
 $.summernote.pluginEvents.formatBlock = function (event, editor, layoutInfo, sTagName) {
+    $.summernote.pluginEvents.applyFont(event, editor, layoutInfo, null, null, "Default");
     var $editable = layoutInfo.editable();
     $editable.data('NoteHistory').recordUndo($editable);
     event.preventDefault();
@@ -1778,7 +1945,7 @@ $.summernote.pluginEvents.formatBlock = function (event, editor, layoutInfo, sTa
     }
 
     // fix by odoo because if you select a style in a li with no p tag all the ul is wrapped by the style tag
-    var nodes = dom.listBetween(r.sc, r.ec);
+    var nodes = dom.listBetween(r.sc, r.ec, r.so, r.eo);
     for (var i=0; i<nodes.length; i++) {
         if (dom.isBR(nodes[i]) || (dom.isText(nodes[i]) && dom.isVisibleText(nodes[i])) || dom.isB(nodes[i]) || dom.isU(nodes[i]) || dom.isS(nodes[i]) || dom.isI(nodes[i]) || dom.isFont(nodes[i])) {
             var ancestor = dom.ancestor(nodes[i], isFormatNode);
@@ -1812,74 +1979,21 @@ $.summernote.pluginEvents.removeFormat = function (event, editor, layoutInfo, va
     event.preventDefault();
     return false;
 };
-var fn_boutton_updateRecentColor = eventHandler.modules.toolbar.button.updateRecentColor;
-eventHandler.modules.toolbar.button.updateRecentColor = function (elBtn, sEvent, sValue) {
-    fn_boutton_updateRecentColor.call(this, elBtn, sEvent, sValue);
-    var $recentcolor = $.find('.note-recent-color i');
-    var $recentcolorbtn = $.find('.note-recent-color');
-
-    //find last used color for fonts or for icons
-    //set this color into recentcolor button of both font and icon
-    for (var i in $recentcolor) {
-        var $font = $recentcolor[i];
-        var $button = $($recentcolorbtn[i]);
-        var className = $font.className.split(/\s+/);
-        var k;
-        if (sEvent === "foreColor") {
-            //set class for forecolor to recentcolor button font-icon
-            for (k=2; k<className.length; k++) {
-                if (className[k].length && className[k].slice(0,5) === "text-") {
-                  className.splice(k,1);
-                  k--;
-                }
-            }
-            if (sValue.indexOf('text-') !== -1) {
-                $font.className = className.join(' ') + ' ' + sValue;
-                $font.style.color = '';
-            } else {
-                $font.className = $font.className.replace(/(^|\s+)text-\S+/, '');
-                $font.style.color = sValue !== 'inherit' ? sValue : "";
-            }
-        } else {
-            //set class for backcolor to recentcolor button font-icon
-            for (k=2; k<className.length; k++) {
-                if (className[k].length && className[k].slice(0,3) === "bg-") {
-                  className.splice(k,1);
-                  k--;
-                }
-            }
-            if (sValue.indexOf('bg-') !== -1) {
-                $font.className =className.join(' ') + ' ' + sValue;
-                $font.style.backgroundColor = "";
-            } else {
-                $font.className = $font.className.replace(/(^|\s+)bg-\S+/, '');
-                $font.style.backgroundColor = sValue !== 'inherit' ? sValue : "";
-            }
-        }
-        if (sValue !== 'inherit') {
-            //set attribute for color to the recentcolor button
-            var colorInfo = JSON.parse($button.attr('data-value'));
-            colorInfo[sEvent] = sValue;
-            $button.attr('data-value', JSON.stringify(colorInfo));
-        }
-    }
-    return false;
-};
-
-$(document).on('click keyup', function () {
-    var $popover = $((range.create()||{}).sc).closest('[contenteditable]');
-    var popover_history = ($popover.data()||{}).NoteHistory;
-    if (!popover_history || popover_history === history) return;
-    var editor = $popover.parent('.note-editor');
-    $('button[data-event="undo"]', editor).attr('disabled', !popover_history.hasUndo());
-    $('button[data-event="redo"]', editor).attr('disabled', !popover_history.hasRedo());
-});
 
 eventHandler.modules.editor.undo = function ($popover) {
     if (!$popover.attr('disabled')) $popover.data('NoteHistory').undo();
 };
 eventHandler.modules.editor.redo = function ($popover) {
     if (!$popover.attr('disabled'))  $popover.data('NoteHistory').redo();
+};
+
+// Get color and background color of node to update recent color button
+var fn_from_node = eventHandler.modules.editor.style.fromNode;
+eventHandler.modules.editor.style.fromNode = function ($node) {
+    var styleInfo = fn_from_node.apply(this, arguments);
+    styleInfo['color'] = $node.css('color');
+    styleInfo['background-color'] = $node.css('background-color');
+    return styleInfo;
 };
 
 // use image toolbar if current range is on image
@@ -1892,6 +2006,14 @@ eventHandler.modules.editor.currentStyle = function (target) {
         var r = range.create();
         if (r)
             styleInfo.image = r.isOnImg();
+    }
+    // Fix when the target is a link: the text-align buttons state should
+    // indicate the alignment of the link in the parent, not the text inside
+    // the link (which is not possible to customize with summernote). Summernote fixed
+    // this in their newest version... by just not showing the active button
+    // for alignments.
+    if (styleInfo.anchor) {
+        styleInfo['text-align'] = $(styleInfo.anchor).parent().css('text-align');
     }
     return styleInfo;
 };
@@ -2065,7 +2187,6 @@ $.summernote.pluginEvents.applyFont = function (event, editor, layoutInfo, color
     }
 
     // remove node without attributes (move content), and merge the same nodes
-    if (!dom.isImgFont(node)) {
      var className2, style, style2;
      for (i=0; i<nodes.length; i++) {
       node = nodes[i];
@@ -2106,7 +2227,6 @@ $.summernote.pluginEvents.applyFont = function (event, editor, layoutInfo, color
         }
       }
      }
-    }
 
     range.create(startPoint.node, startPoint.offset, endPoint.node, endPoint.offset).select();
 };
@@ -2148,7 +2268,7 @@ $.summernote.pluginEvents.backColor = function (event, editor, layoutInfo, backC
 };
 
 options.onCreateLink = function (sLinkUrl) {
-    if (sLinkUrl.indexOf('mailto:') === 0) {
+    if (sLinkUrl.indexOf('mailto:') === 0 || sLinkUrl.indexOf('tel:') === 0) {
       // pass
     } else if (sLinkUrl.indexOf('@') !== -1 && sLinkUrl.indexOf(':') === -1) {
       sLinkUrl =  'mailto:' + sLinkUrl;
@@ -2279,26 +2399,6 @@ eventHandler.modules.popover.update = function ($popover, oStyle, isAirMode) {
     if ((isAirMode ? $popover : $popover.parent()).find('.note-table').length) {
         summernote_table_update(oStyle);
     }
-};
-
-// override summernote clipboard functionality
-eventHandler.modules.clipboard.attach = function (layoutInfo) {
-    var $editable = layoutInfo.editable();
-    $editable.on('paste', function (e) {
-        var clipboardData = ((e.originalEvent || e).clipboardData || window.clipboardData);
-        // Change nothing if pasting html (copy from text editor / web / ...) or
-        // if clipboardData is not available (IE / ...)
-        if (clipboardData && clipboardData.types && clipboardData.types.length === 1 && clipboardData.types[0] === "text/plain") {
-            e.preventDefault();
-            $editable.data('NoteHistory').recordUndo($editable); // FIXME
-            var pastedText = clipboardData.getData("text/plain");
-            // Try removing linebreaks which are not really linebreaks (in a PDF,
-            // when a sentence goes over the next line, copying it considers it
-            // a linebreak for example).
-            var formattedText = pastedText.replace(/([\w-])\r?\n([\w-])/g, "$1 $2").trim();
-            document.execCommand("insertText", false, formattedText);
-        }
-    });
 };
 
 var fn_attach = eventHandler.attach;

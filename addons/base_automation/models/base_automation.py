@@ -10,7 +10,7 @@ from collections import defaultdict
 import dateutil
 from dateutil.relativedelta import relativedelta
 
-from odoo import api, fields, models, SUPERUSER_ID
+from odoo import _, api, fields, models, SUPERUSER_ID
 from odoo.modules.registry import Registry
 from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo.tools.safe_eval import safe_eval
@@ -77,6 +77,19 @@ class BaseAutomation(models.Model):
             self.trg_date_id = self.trg_date_range = self.trg_date_range_type = False
         elif self.trigger == 'on_time':
             self.filter_pre_domain = False
+
+    @api.onchange('trigger', 'state')
+    def _onchange_state(self):
+        if self.trigger == 'on_change' and self.state != 'code':
+            ff = self.fields_get(['trigger', 'state'])
+            return {'warning': {
+                'title': _("Warning"),
+                'message': _("The \"%(trigger_value)s\" %(trigger_label)s can only be used with the \"%(state_value)s\" action type") % {
+                    'trigger_value': dict(ff['trigger']['selection'])['on_change'],
+                    'trigger_label': ff['trigger']['string'],
+                    'state_value': dict(ff['state']['selection'])['code'],
+                }
+            }}
 
     @api.model
     def create(self, vals):
@@ -199,16 +212,16 @@ class BaseAutomation(models.Model):
 
         def make_create():
             """ Instanciate a create method that processes action rules. """
-            @api.model
-            def create(self, vals, **kw):
+            @api.model_create_multi
+            def create(self, vals_list, **kw):
                 # retrieve the action rules to possibly execute
                 actions = self.env['base.automation']._get_actions(self, ['on_create', 'on_create_or_write'])
                 # call original method
-                record = create.origin(self.with_env(actions.env), vals, **kw)
+                records = create.origin(self.with_env(actions.env), vals_list, **kw)
                 # check postconditions, and execute actions on the records that satisfy them
                 for action in actions.with_context(old_values=None):
-                    action._process(action._filter_post(record))
-                return record.with_env(self.env)
+                    action._process(action._filter_post(records))
+                return records.with_env(self.env)
 
             return create
 
@@ -282,7 +295,15 @@ class BaseAutomation(models.Model):
 
         # retrieve all actions, and patch their corresponding model
         for action_rule in self.with_context({}).search([]):
-            Model = self.env[action_rule.model_name]
+            Model = self.env.get(action_rule.model_name)
+
+            # Do not crash if the model of the base_action_rule was uninstalled
+            if Model is None:
+                _logger.warning("Action rule with ID %d depends on model %s" %
+                                (action_rule.id,
+                                 action_rule.model_name))
+                continue
+
             if action_rule.trigger == 'on_create':
                 patch(Model, 'create', make_create())
 
@@ -307,7 +328,7 @@ class BaseAutomation(models.Model):
         if action.trg_date_calendar_id and action.trg_date_range_type == 'day':
             return action.trg_date_calendar_id.plan_days(
                 action.trg_date_range,
-                day_date=fields.Datetime.from_string(record_dt),
+                fields.Datetime.from_string(record_dt),
                 compute_leaves=True,
             )
         else:

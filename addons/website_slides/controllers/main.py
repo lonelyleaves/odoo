@@ -57,7 +57,8 @@ class WebsiteSlides(http.Controller):
         """ Returns a list of available channels: if only one is available,
             redirects directly to its slides
         """
-        channels = request.env['slide.channel'].search([], order='sequence, id')
+        domain = request.website.website_domain()
+        channels = request.env['slide.channel'].search(domain, order='sequence, id')
         if not channels:
             return request.render("website_slides.channel_not_found")
         elif len(channels) == 1:
@@ -71,6 +72,7 @@ class WebsiteSlides(http.Controller):
     def sitemap_slide(env, rule, qs):
         Channel = env['slide.channel']
         dom = sitemap_qs2dom(qs=qs, route='/slides/', field=Channel._rec_name)
+        dom += env['website'].get_current_website().website_domain()
         for channel in Channel.search(dom):
             loc = '/slides/%s' % slug(channel)
             if not qs or qs.lower() in loc:
@@ -78,7 +80,7 @@ class WebsiteSlides(http.Controller):
 
     @http.route([
         '''/slides/<model("slide.channel"):channel>''',
-        '''/slides/<model("slide.channel):channel>/page/<int:page>''',
+        '''/slides/<model("slide.channel"):channel>/page/<int:page>''',
 
         '''/slides/<model("slide.channel"):channel>/<string:slide_type>''',
         '''/slides/<model("slide.channel"):channel>/<string:slide_type>/page/<int:page>''',
@@ -93,6 +95,9 @@ class WebsiteSlides(http.Controller):
         '''/slides/<model("slide.channel"):channel>/category/<model("slide.category"):category>/<string:slide_type>/page/<int:page>'''],
         type='http', auth="public", website=True, sitemap=sitemap_slide)
     def channel(self, channel, category=None, tag=None, page=1, slide_type=None, sorting='creation', search=None, **kw):
+        if not channel.can_access_from_current_website():
+            raise werkzeug.exceptions.NotFound()
+
         user = request.env.user
         Slide = request.env['slide.slide']
         domain = [('channel_id', '=', channel.id)]
@@ -164,8 +169,11 @@ class WebsiteSlides(http.Controller):
     # SLIDE.SLIDE CONTOLLERS
     # --------------------------------------------------
 
-    @http.route('''/slides/slide/<model("slide.slide", "[('channel_id.can_see', '=', True)]"):slide>''', type='http', auth="public", website=True)
+    @http.route('''/slides/slide/<model("slide.slide", "[('channel_id.can_see', '=', True), ('website_id', 'in', (False, current_website_id))]"):slide>''', type='http', auth="public", website=True)
     def slide_view(self, slide, **kwargs):
+        if not slide.channel_id.can_access_from_current_website():
+            raise werkzeug.exceptions.NotFound()
+
         values = self._get_slide_detail(slide)
         if not values.get('private'):
             self._set_viewed_slide(slide, 'slide')
@@ -179,8 +187,9 @@ class WebsiteSlides(http.Controller):
         response.mimetype = 'application/pdf'
         return response
 
-    @http.route('''/slides/slide/<model("slide.slide"):slide>/download''', type='http', auth="public", website=True)
-    def slide_download(self, slide, sitemap=False):
+    @http.route('''/slides/slide/<model("slide.slide"):slide>/download''', type='http', auth="public", website=True, sitemap=False)
+    def slide_download(self, slide, **kw):
+        slide = slide.sudo()
         if slide.download_security == 'public' or (slide.download_security == 'user' and request.session.uid):
             filecontent = base64.b64decode(slide.datas)
             disposition = 'attachment; filename=%s.pdf' % werkzeug.urls.url_quote(slide.name)
@@ -190,11 +199,11 @@ class WebsiteSlides(http.Controller):
                  ('Content-Length', len(filecontent)),
                  ('Content-Disposition', disposition)])
         elif not request.session.uid and slide.download_security == 'user':
-            return werkzeug.utils.redirect('/web?redirect=/slides/slide/%s' % (slide.id))
+            return request.redirect('/web/login?redirect=/slides/slide/%s' % (slide.id))
         return request.render("website.403")
 
     @http.route('''/slides/slide/<model("slide.slide"):slide>/promote''', type='http', auth='user', website=True)
-    def slide_set_promoted(self, slide):
+    def slide_set_promoted(self, slide, **kwargs):
         slide.channel_id.promoted_slide_id = slide.id
         return request.redirect("/slides/%s" % slide.channel_id.id)
 
@@ -258,9 +267,11 @@ class WebsiteSlides(http.Controller):
 
     @http.route(['/slides/add_slide'], type='json', auth='user', methods=['POST'], website=True)
     def create_slide(self, *args, **post):
-        file_size = len(post['datas']) * 3 / 4; # base64
-        if (file_size / 1024.0 / 1024.0) > 25:
-            return {'error': _('File is too big. File size cannot exceed 25MB')}
+        # check the size only when we upload a file.
+        if post.get('datas'):
+            file_size = len(post['datas']) * 3 / 4 # base64
+            if (file_size / 1024.0 / 1024.0) > 25:
+                return {'error': _('File is too big. File size cannot exceed 25MB')}
 
         values = dict((fname, post[fname]) for fname in [
             'name', 'url', 'tag_ids', 'slide_type', 'channel_id',

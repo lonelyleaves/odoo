@@ -7,6 +7,7 @@ from odoo import api, fields, models
 class TimesheetAttendance(models.Model):
     _name = 'hr.timesheet.attendance.report'
     _auto = False
+    _description = 'Timesheet Attendance Report'
 
     user_id = fields.Many2one('res.users')
     date = fields.Date()
@@ -42,6 +43,7 @@ class TimesheetAttendance(models.Model):
                     ts.unit_amount AS timesheet,
                     date_trunc('day', ts.date) AS date
                 FROM account_analytic_line AS ts
+                WHERE ts.project_id IS NOT NULL
             ) AS t
             GROUP BY t.user_id, t.date
             ORDER BY t.date

@@ -23,10 +23,10 @@ class MrpUnbuild(models.Model):
         'product.product', 'Product',
         required=True, states={'done': [('readonly', True)]})
     product_qty = fields.Float(
-        'Quantity',
+        'Quantity', default=1.0,
         required=True, states={'done': [('readonly', True)]})
     product_uom_id = fields.Many2one(
-        'product.uom', 'Unit of Measure',
+        'uom.uom', 'Unit of Measure',
         required=True, states={'done': [('readonly', True)]})
     bom_id = fields.Many2one(
         'mrp.bom', 'Bill of Material',
@@ -51,10 +51,10 @@ class MrpUnbuild(models.Model):
         required=True, states={'done': [('readonly', True)]})
     consume_line_ids = fields.One2many(
         'stock.move', 'consume_unbuild_id', readonly=True,
-        help='')  # TDE: some string / help ?
+        string='Consumed Disassembly Lines')
     produce_line_ids = fields.One2many(
         'stock.move', 'unbuild_id', readonly=True,
-        help='')  # TDE: some string / help ?
+        string='Processed Disassembly Lines')
     state = fields.Selection([
         ('draft', 'Draft'),
         ('done', 'Done')], string='Status', default='draft', index=True)
@@ -83,16 +83,26 @@ class MrpUnbuild(models.Model):
         return super(MrpUnbuild, self).create(vals)
 
     @api.multi
+    def unlink(self):
+        if 'done' in self.mapped('state'):
+            raise UserError(_("You cannot delete an unbuild order if the state is 'Done'."))
+        return super(MrpUnbuild, self).unlink()
+
+    @api.multi
     def action_unbuild(self):
         self.ensure_one()
         if self.product_id.tracking != 'none' and not self.lot_id.id:
-            raise UserError(_('Should have a lot for the finished product'))
+            raise UserError(_('You should provide a lot number for the final product.'))
+
+        if self.mo_id:
+            if self.mo_id.state != 'done':
+                raise UserError(_('You cannot unbuild a undone manufacturing order.'))
 
         consume_move = self._generate_consume_moves()[0]
         produce_moves = self._generate_produce_moves()
 
         if any(produce_move.has_tracking != 'none' and not self.mo_id for produce_move in produce_moves):
-            raise UserError(_('You should specify a manufacturing order in order to find the correct tracked products.'))
+            raise UserError(_('Some of your components are tracked, you have to specify a manufacturing order in order to retrieve the correct components.'))
 
         if consume_move.has_tracking != 'none':
             self.env['stock.move.line'].create({
@@ -146,6 +156,7 @@ class MrpUnbuild(models.Model):
                 'product_uom_qty': unbuild.product_qty,
                 'location_id': unbuild.location_id.id,
                 'location_dest_id': unbuild.product_id.property_stock_production.id,
+                'warehouse_id': unbuild.location_id.get_warehouse().id,
                 'origin': unbuild.name,
                 'consume_unbuild_id': unbuild.id,
             })
@@ -156,11 +167,31 @@ class MrpUnbuild(models.Model):
     def _generate_produce_moves(self):
         moves = self.env['stock.move']
         for unbuild in self:
-            factor = unbuild.product_uom_id._compute_quantity(unbuild.product_qty, unbuild.bom_id.product_uom_id) / unbuild.bom_id.product_qty
-            boms, lines = unbuild.bom_id.explode(unbuild.product_id, factor, picking_type=unbuild.bom_id.picking_type_id)
-            for line, line_data in lines:
-                moves += unbuild._generate_move_from_bom_line(line, line_data['qty'])
+            if unbuild.mo_id:
+                raw_moves = unbuild.mo_id.move_raw_ids.filtered(lambda move: move.state == 'done')
+                factor = unbuild.product_qty / unbuild.mo_id.product_uom_id._compute_quantity(unbuild.mo_id.product_qty, unbuild.product_uom_id)
+                for raw_move in raw_moves:
+                    moves += unbuild._generate_move_from_raw_moves(raw_move, factor)
+            else:
+                factor = unbuild.product_uom_id._compute_quantity(unbuild.product_qty, unbuild.bom_id.product_uom_id) / unbuild.bom_id.product_qty
+                boms, lines = unbuild.bom_id.explode(unbuild.product_id, factor, picking_type=unbuild.bom_id.picking_type_id)
+                for line, line_data in lines:
+                    moves += unbuild._generate_move_from_bom_line(line, line_data['qty'])
         return moves
+
+    def _generate_move_from_raw_moves(self, raw_move, factor):
+        return self.env['stock.move'].create({
+            'name': self.name,
+            'date': self.create_date,
+            'product_id': raw_move.product_id.id,
+            'product_uom_qty': raw_move.product_uom_qty * factor,
+            'product_uom': raw_move.product_uom.id,
+            'procure_method': 'make_to_stock',
+            'location_dest_id': self.location_dest_id.id,
+            'location_id': raw_move.location_dest_id.id,
+            'warehouse_id': self.location_dest_id.get_warehouse().id,
+            'unbuild_id': self.id,
+        })
 
     def _generate_move_from_bom_line(self, bom_line, quantity):
         return self.env['stock.move'].create({
@@ -173,6 +204,7 @@ class MrpUnbuild(models.Model):
             'procure_method': 'make_to_stock',
             'location_dest_id': self.location_dest_id.id,
             'location_id': self.product_id.property_stock_production.id,
+            'warehouse_id': self.location_dest_id.get_warehouse().id,
             'unbuild_id': self.id,
         })
 

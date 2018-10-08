@@ -52,6 +52,29 @@ if ($.blockUI) {
 }
 
 
+/**
+ * Remove the "accesskey" attributes to avoid the use of the access keys
+ * while the blockUI is enable.
+ */
+
+function blockAccessKeys() {
+    var elementWithAccessKey = [];
+    elementWithAccessKey = document.querySelectorAll('[accesskey]');
+    _.each(elementWithAccessKey, function (elem) {
+        elem.setAttribute("data-accesskey",elem.getAttribute('accesskey'));
+        elem.removeAttribute('accesskey');
+    });
+}
+
+function unblockAccessKeys() {
+    var elementWithDataAccessKey = [];
+    elementWithDataAccessKey = document.querySelectorAll('[data-accesskey]');
+    _.each(elementWithDataAccessKey, function (elem) {
+        elem.setAttribute('accesskey', elem.getAttribute('data-accesskey'));
+        elem.removeAttribute('data-accesskey');
+    });
+}
+
 var throbbers = [];
 
 function blockUI() {
@@ -59,12 +82,16 @@ function blockUI() {
     var throbber = new Throbber();
     throbbers.push(throbber);
     throbber.appendTo($(".oe_blockui_spin_container"));
+    $(document.body).addClass('o_ui_blocked');
+    blockAccessKeys();
     return tmp;
 }
 
 function unblockUI() {
     _.invoke(throbbers, 'destroy');
     throbbers = [];
+    $(document.body).removeClass('o_ui_blocked');
+    unblockAccessKeys();
     return $.unblockUI.apply($, arguments);
 }
 
@@ -138,17 +165,6 @@ function Home (parent, action) {
 }
 core.action_registry.add("home", Home);
 
-/**
- * Client action to go back in breadcrumb history.
- * If can't go back in history stack, will go back to home.
- */
-function HistoryBack (parent) {
-    parent.history_back().fail(function () {
-        Home(parent);
-    });
-}
-core.action_registry.add("history_back", HistoryBack);
-
 function login() {
     redirect('/web/login');
 }
@@ -173,6 +189,23 @@ function ReloadContext (parent, action) {
 }
 core.action_registry.add("reload_context", ReloadContext);
 
+// In Internet Explorer, document doesn't have the contains method, so we make a
+// polyfill for the method in order to be compatible.
+if (!document.contains) {
+    document.contains = function contains (node) {
+        if (!(0 in arguments)) {
+            throw new TypeError('1 argument is required');
+        }
+
+        do {
+            if (this === node) {
+                return true;
+            }
+        } while (node = node && node.parentNode);
+
+        return false;
+    };
+}
 
 return {
     blockUI: blockUI,

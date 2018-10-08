@@ -17,16 +17,19 @@ class SaleOrder(models.Model):
     has_delivery = fields.Boolean(
         compute='_compute_has_delivery', string='Has delivery',
         help="Has an order line set for delivery", store=True)
-    website_order_line = fields.One2many(
-        'sale.order.line', 'order_id',
-        string='Order Lines displayed on Website', readonly=True,
-        domain=[('is_delivery', '=', False)],
-        help='Order Lines to be displayed on the website. They should not be used for computation purpose.')
+
+    @api.one
+    def _compute_website_order_line(self):
+        super(SaleOrder, self)._compute_website_order_line()
+        self.website_order_line = self.website_order_line.filtered(lambda l: not l.is_delivery)
 
     @api.depends('order_line.price_unit', 'order_line.tax_id', 'order_line.discount', 'order_line.product_uom_qty')
     def _compute_amount_delivery(self):
         for order in self:
-            order.amount_delivery = sum(order.order_line.filtered('is_delivery').mapped('price_subtotal'))
+            if self.env.user.has_group('account.group_show_line_subtotals_tax_excluded'):
+                order.amount_delivery = sum(order.order_line.filtered('is_delivery').mapped('price_subtotal'))
+            else:
+                order.amount_delivery = sum(order.order_line.filtered('is_delivery').mapped('price_total'))
 
     @api.depends('order_line.is_delivery')
     def _compute_has_delivery(self):
@@ -42,6 +45,10 @@ class SaleOrder(models.Model):
             self._remove_delivery_line()
             return True
         else:
+            # attempt to use partner's preferred carrier
+            if not force_carrier_id and self.partner_shipping_id.property_delivery_carrier_id:
+                force_carrier_id = self.partner_shipping_id.property_delivery_carrier_id.id
+
             carrier = force_carrier_id and DeliveryCarrier.browse(force_carrier_id) or self.carrier_id
             available_carriers = self._get_delivery_methods()
             if carrier:
@@ -58,12 +65,11 @@ class SaleOrder(models.Model):
                         carrier = delivery
                         break
                 self.write({'carrier_id': carrier.id})
+            self._remove_delivery_line()
             if carrier:
                 self.get_delivery_price()
                 if self.delivery_rating_success:
                     self.set_delivery_line()
-            else:
-                self._remove_delivery_line()
 
         return bool(carrier)
 

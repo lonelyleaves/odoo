@@ -8,6 +8,7 @@ odoo.define('website.content.snippets.animation', function (require) {
 var Class = require('web.Class');
 var core = require('web.core');
 var mixins = require('web.mixins');
+var utils = require('web.utils');
 var Widget = require('web.Widget');
 
 var qweb = core.qweb;
@@ -343,12 +344,19 @@ var Animation = Widget.extend({
      * Also stops animation effects and destroys them if any.
      */
     destroy: function () {
+        var $oldel = this.$el;
         // The difference with the default behavior is that we unset the
         // associated element first so that:
         // 1) its events are unbinded
         // 2) it is not removed from the DOM
         this.setElement(null);
         this._super.apply(this, arguments);
+        // Reassign the variables afterwards to allow extensions to use them
+        // after calling the _super method
+        this.$el = $oldel;
+        this.el = $oldel[0];
+        this.$target = this.$el;
+        this.target = this.el;
     },
     /**
      * @override
@@ -423,6 +431,23 @@ registry.slider = Animation.extend({
      * @override
      */
     start: function () {
+        if (!this.editableMode) {
+            var maxHeight = 0;
+            var $items = this.$('.item');
+            _.each($items, function (el) {
+                var $item = $(el);
+                var isActive =  $item.hasClass('active');
+                $item.addClass('active');
+                var height = $item.outerHeight();
+                if (height > maxHeight) {
+                    maxHeight = height;
+                }
+                $item.toggleClass('active', isActive);
+            });
+            _.each($items, function (el) {
+                $(el).css('min-height', maxHeight);
+            });
+        }
         this.$target.carousel();
         return this._super.apply(this, arguments);
     },
@@ -433,6 +458,9 @@ registry.slider = Animation.extend({
         this._super.apply(this, arguments);
         this.$target.carousel('pause');
         this.$target.removeData('bs.carousel');
+        _.each(this.$('.item'), function (el) {
+            $(el).css('min-height', '');
+        });
     },
 });
 
@@ -545,7 +573,7 @@ registry.parallax = Animation.extend({
 });
 
 registry.share = Animation.extend({
-    selector: '.oe_share',
+    selector: '.s_share, .oe_share', // oe_share for compatibility
 
     /**
      * @override
@@ -583,14 +611,37 @@ registry.mediaVideo = Animation.extend({
      * @override
      */
     start: function () {
-        if (!this.$target.has('> iframe').length) {
-            var editor = '<div class="css_editableMode_display">&nbsp;</div>';
-            var size = '<div class="media_iframe_video_size">&nbsp;</div>';
-            this.$target.html(editor+size);
+        // TODO: this code should be refactored to make more sense and be better
+        // integrated with Odoo (this refactoring should be done in master).
+
+        var def = this._super.apply(this, arguments);
+        if (this.$target.children('iframe').length) {
+            // There already is an <iframe/>, do nothing
+            return def;
         }
-        // rebuilding the iframe, from https://www.html5rocks.com/en/tutorials/security/sandboxed-iframes/
-        this.$target.html(this.$target.html()+'<iframe sandbox="allow-scripts allow-same-origin" src="'+_.escape(this.$target.data("oe-expression"))+'" frameborder="0" allowfullscreen="allowfullscreen"></iframe>');
-        return this._super.apply(this, arguments);
+
+        // Bug fix / compatibility: empty the <div/> element as all information
+        // to rebuild the iframe should have been saved on the <div/> element
+        this.$target.empty();
+
+        // Add extra content for size / edition
+        this.$target.append(
+            '<div class="css_editable_mode_display">&nbsp;</div>' +
+            '<div class="media_iframe_video_size">&nbsp;</div>'
+        );
+
+        // Rebuild the iframe. Depending on version / compatibility / instance,
+        // the src is saved in the 'data-src' attribute or the
+        // 'data-oe-expression' one (the latter is used as a workaround in 10.0
+        // system but should obviously be reviewed in master).
+        this.$target.append($('<iframe/>', {
+            src: _.escape(this.$target.data('oe-expression') || this.$target.data('src')),
+            frameborder: '0',
+            allowfullscreen: 'allowfullscreen',
+            sandbox: 'allow-scripts allow-same-origin', // https://www.html5rocks.com/en/tutorials/security/sandboxed-iframes/
+        }));
+
+        return def;
     },
 });
 
@@ -648,6 +699,7 @@ registry.gallery = Animation.extend({
      * @param {Event} ev
      */
     _onClickImg: function (ev) {
+        var self = this;
         var $cur = $(ev.currentTarget);
 
         var urls = [];
@@ -692,7 +744,12 @@ registry.gallery = Animation.extend({
         $modal.find('.modal-content, .modal-body.o_slideshow').css('height', '100%');
         $modal.appendTo(document.body);
 
-        this.carousel = new registry.gallery_slider($modal.find('.carousel').carousel());
+        $modal.one('shown.bs.modal', function () {
+            self.trigger_up('animation_start_demand', {
+                editableMode: false,
+                $target: $modal.find('.modal-body.o_slideshow'),
+            });
+        });
     },
 });
 
@@ -707,9 +764,9 @@ registry.gallerySlider = Animation.extend({
         var self = this;
         this.$carousel = this.$target.is('.carousel') ? this.$target : this.$target.find('.carousel');
         this.$indicator = this.$carousel.find('.carousel-indicators');
-        this.$prev = this.$indicator.find('li.fa:first').css('visibility', ''); // force visibility as some databases have it hidden
-        this.$next = this.$indicator.find('li.fa:last').css('visibility', '');
-        var $lis = this.$indicator.find('li:not(.fa)');
+        this.$prev = this.$indicator.find('li.o_indicators_left').css('visibility', ''); // force visibility as some databases have it hidden
+        this.$next = this.$indicator.find('li.o_indicators_right').css('visibility', '');
+        var $lis = this.$indicator.find('li[data-slide-to]');
         var nbPerPage = Math.floor(this.$indicator.width() / $lis.first().outerWidth(true)) - 3; // - navigator - 1 to leave some space
         var realNbPerPage = nbPerPage || 1;
         var nbPages = Math.ceil($lis.length / realNbPerPage);
@@ -720,7 +777,7 @@ registry.gallerySlider = Animation.extend({
 
         function hide() {
             $lis.each(function (i) {
-                $(this).toggleClass('hidden', !(i >= page*nbPerPage && i < (page+1)*nbPerPage));
+                $(this).toggleClass('d-none', !(i >= page*nbPerPage && i < (page+1)*nbPerPage));
             });
             if (self.editableMode) { // do not remove DOM in edit mode
                 return;
@@ -745,14 +802,14 @@ registry.gallerySlider = Animation.extend({
 
         this.$carousel.on('slide.bs.carousel.gallery_slider', function () {
             setTimeout(function () {
-                var $item = self.$carousel.find('.carousel-inner .prev, .carousel-inner .next');
+                var $item = self.$carousel.find('.carousel-inner .carousel-item-prev, .carousel-inner .carousel-item-next');
                 var index = $item.index();
                 $lis.removeClass('active')
                     .filter('[data-slide-to="'+index+'"]')
                     .addClass('active');
             }, 0);
         });
-        this.$indicator.on('click.gallery_slider', '> li.fa', function () {
+        this.$indicator.on('click.gallery_slider', '> li:not([data-slide-to])', function () {
             page += ($(this).hasClass('o_indicators_left') ? -1 : 1);
             page = Math.max(0, Math.min(nbPages - 1, page)); // should not be necessary
             self.$carousel.carousel(page * realNbPerPage);
@@ -812,7 +869,7 @@ registry.socialShare = Animation.extend({
             var self = this;
             setTimeout(function () {
                 if (!$(".popover:hover").length) {
-                    $(self).popover("destroy");
+                    $(self).popover('dispose');
                 }
             }, 200);
         });
@@ -826,7 +883,7 @@ registry.socialShare = Animation.extend({
         var hashtags = ' #'+ document.title.split(" | ")[1].replace(' ','') + ' ' + this.hashtags;  // company name without spaces (for hashtag)
         var social_network = {
             'facebook': 'https://www.facebook.com/sharer/sharer.php?u=' + url,
-            'twitter': 'https://twitter.com/intent/tweet?original_referer=' + url + '&text=' + encodeURIComponent(title + hashtags + ' - ' + url),
+            'twitter': 'https://twitter.com/intent/tweet?original_referer=' + url + '&text=' + encodeURIComponent(title + hashtags + ' - ') + url,
             'linkedin': 'https://www.linkedin.com/shareArticle?mini=true&url=' + url + '&title=' + encodeURIComponent(title),
             'google-plus': 'https://plus.google.com/share?url=' + url,
         };
@@ -855,6 +912,50 @@ registry.socialShare = Animation.extend({
 
         this._render();
         this._bindSocialEvent();
+    },
+});
+
+registry.facebookPage = Animation.extend({
+    selector: '.o_facebook_page',
+
+    /**
+     * @override
+     */
+    start: function () {
+        var def = this._super.apply(this, arguments);
+
+        var params = _.pick(this.$el.data(), 'href', 'height', 'tabs', 'small_header', 'hide_cover', 'show_facepile');
+        if (!params.href) {
+            return def;
+        }
+        params.width = utils.confine(this.$el.width(), 180, 500);
+
+        var src = $.param.querystring('https://www.facebook.com/plugins/page.php', params);
+        this.$iframe = $('<iframe/>', {
+            src: src,
+            width: params.width,
+            height: params.height,
+            css: {
+                border: 'none',
+                overflow: 'hidden',
+            },
+            scrolling: 'no',
+            frameborder: '0',
+            allowTransparency: 'true',
+        });
+        this.$el.append(this.$iframe);
+
+        return def;
+    },
+    /**
+     * @override
+     */
+    destroy: function () {
+        this._super.apply(this, arguments);
+
+        if (this.$iframe) {
+            this.$iframe.remove();
+        }
     },
 });
 
